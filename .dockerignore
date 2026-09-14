@@ -1,0 +1,29 @@
+# Backend
+/backend/vendor
+/backend/bin
+/backend/.env
+/backend/*.log
+
+# Frontend
+/frontend/node_modules
+/frontend/dist
+/frontend/.env
+/frontend/.env.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.gitignore
+.git
+
+# Docker
+docker-compose.override.yml
