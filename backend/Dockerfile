@@ -1,26 +1,10 @@
-# syntax=docker/dockerfile:1
-FROM golang:1.24-alpine AS builder
-
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
-
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
-
 COPY . .
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
-
-# Production image
-FROM alpine:3.19
-
-RUN apk add --no-cache ca-certificates tzdata wget
-
-WORKDIR /app
-
-COPY --from=builder /app/server .
-
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/cima-api ./cmd/server
+FROM alpine:3.20
+COPY --from=builder /out/cima-api /cima-api
 EXPOSE 8080
-
-HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=15s \
-  CMD wget --quiet --tries=1 --spider http://localhost:8080/health || exit 1
-
-CMD ["./server"]
+CMD ["/cima-api"]
