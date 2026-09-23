@@ -1,91 +1,37 @@
-version: '3.9'
-
 services:
   mongodb:
-    image: mongo:7-alpine
+    image: mongo:7
     container_name: cima-mongodb
     restart: unless-stopped
-    ports:
-      - "${MONGO_PORT:-27017}:27017"
-    environment:
-      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-senior_suite}
-    volumes:
-      - mongodb-data:/data/db
-      - mongodb-config:/data/configdb
+    ports: ["27017:27017"]
+    volumes: ["cima_mongo_data:/data/db"]
+    networks: [cima-network]
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
-    networks:
-      - cima-net
-
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: ./backend
     container_name: cima-backend
-    restart: unless-stopped
-    ports:
-      - "${APP_PORT:-8080}:8080"
     environment:
-      APP_ENV: ${APP_ENV:-development}
       APP_PORT: 8080
-      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
-      MONGO_DATABASE: ${MONGO_DATABASE:-senior_suite}
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
-      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-168h}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
-      FILE_STORAGE_PATH: ${FILE_STORAGE_PATH:-/data/uploads}
-      LOG_LEVEL: ${LOG_LEVEL:-debug}
-    volumes:
-      - ./backend:/app
-      - /app/vendor
-      - uploads-data:/data/uploads
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DATABASE: cima
+    ports: ["8080:8080"]
     depends_on:
       mongodb:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    networks:
-      - cima-net
-    command: go run ./cmd/server
-
+    networks: [cima-network]
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    build: ./frontend
     container_name: cima-frontend
-    restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT:-5173}:5173"
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-      - /app/node_modules
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - cima-net
-    command: npm run dev
-
-volumes:
-  mongodb-data:
-    driver: local
-  mongodb-config:
-    driver: local
-  uploads-data:
-    driver: local
-
+    ports: ["5173:80"]
+    depends_on: [backend]
+    networks: [cima-network]
 networks:
-  cima-net:
-    driver: bridge
+  cima-network:
+    name: cima-network
+volumes:
+  cima_mongo_data:
+    name: cima-mongo-data
