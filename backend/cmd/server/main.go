@@ -1,33 +1,118 @@
 package main
 
 import (
- "context"
- "encoding/json"
- "log"
- "net/http"
- "os"
- "time"
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
- "github.com/go-chi/chi/v5"
- "go.mongodb.org/mongo-driver/bson"
- "go.mongodb.org/mongo-driver/mongo"
- "go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/go-chi/chi/v5"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type App struct{ db *mongo.Database }
-type Resident struct { ID interface{} `json:"id,omitempty" bson:"_id,omitempty"`; FirstName string `json:"firstName" bson:"firstName"`; LastName string `json:"lastName" bson:"lastName"`; Status string `json:"status" bson:"status"` }
+type Resident struct {
+	ID        interface{} `json:"id,omitempty" bson:"_id,omitempty"`
+	FirstName string      `json:"firstName" bson:"firstName"`
+	LastName  string      `json:"lastName" bson:"lastName"`
+	Status    string      `json:"status" bson:"status"`
+}
 
 func main() {
- ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second); defer cancel()
- client, err := mongo.Connect(ctx, options.Client().ApplyURI(getenv("MONGO_URI", "mongodb://mongodb:27017"))); if err != nil { log.Fatal(err) }
- if err = client.Ping(ctx, nil); err != nil { log.Fatal(err) }
- app := &App{db: client.Database(getenv("MONGO_DATABASE", "cima"))}
- r := chi.NewRouter(); r.Get("/health", app.health)
- r.Route("/api/v1", func(r chi.Router) { r.Get("/residents", app.listResidents); r.Post("/residents", app.createResident) })
- log.Println("CIMA API listening on :8080"); log.Fatal(http.ListenAndServe(":"+getenv("APP_PORT", "8080"), r))
+	port := getenv("APP_PORT", "8080")
+	mongoURI := getenv("MONGO_URI", "mongodb://mongodb:27017")
+	dbName := getenv("MONGO_DATABASE", "cima")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	if err != nil {
+		log.Fatalf("mongo connect: %v", err)
+	}
+	defer func() { _ = client.Disconnect(context.Background()) }()
+
+	if err := client.Ping(ctx, nil); err != nil {
+		log.Fatalf("mongo ping: %v", err)
+	}
+
+	collection := client.Database(dbName).Collection("residents")
+
+	r := chi.NewRouter()
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	r.Route("/api/v1/residents", func(r chi.Router) {
+		r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := collection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list residents"})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			residents := make([]Resident, 0)
+			if err := cursor.All(ctx, &residents); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to decode residents"})
+				return
+			}
+			writeJSON(w, http.StatusOK, residents)
+		})
+
+		r.Post("/", func(w http.ResponseWriter, req *http.Request) {
+			var resident Resident
+			if err := json.NewDecoder(req.Body).Decode(&resident); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+				return
+			}
+
+			resident.FirstName = strings.TrimSpace(resident.FirstName)
+			resident.LastName = strings.TrimSpace(resident.LastName)
+			if resident.FirstName == "" || resident.LastName == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "firstName and lastName are required"})
+				return
+			}
+			if resident.Status == "" {
+				resident.Status = "active"
+			}
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			result, err := collection.InsertOne(ctx, resident)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create resident"})
+				return
+			}
+
+			resident.ID = result.InsertedID
+			writeJSON(w, http.StatusCreated, resident)
+		})
+	})
+
+	log.Printf("CIMA API listening on :%s", port)
+	if err := http.ListenAndServe(":"+port, r); err != nil {
+		log.Fatal(err)
+	}
 }
-func (a *App) health(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status":"ok","service":"cima-api"}) }
-func (a *App) listResidents(w http.ResponseWriter, r *http.Request) { ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second); defer cancel(); cur, err := a.db.Collection("residents").Find(ctx, bson.M{}); if err != nil { http.Error(w,"database error",500); return }; defer cur.Close(ctx); out:=[]Resident{}; if err=cur.All(ctx,&out); err != nil { http.Error(w,"database error",500); return }; writeJSON(w,200,out) }
-func (a *App) createResident(w http.ResponseWriter, r *http.Request) { var in Resident; if json.NewDecoder(r.Body).Decode(&in)!=nil || in.FirstName=="" || in.LastName=="" { writeJSON(w,400,map[string]string{"error":"firstName and lastName are required"}); return }; if in.Status=="" { in.Status="active" }; ctx,cancel:=context.WithTimeout(r.Context(),5*time.Second); defer cancel(); result,err:=a.db.Collection("residents").InsertOne(ctx,in); if err!=nil { http.Error(w,"database error",500); return }; in.ID=result.InsertedID; writeJSON(w,201,in) }
-func writeJSON(w http.ResponseWriter, status int, v interface{}) { w.Header().Set("Content-Type","application/json"); w.WriteHeader(status); _=json.NewEncoder(w).Encode(v) }
-func getenv(k, fallback string) string { if v:=os.Getenv(k); v!="" { return v }; return fallback }
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func getenv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}

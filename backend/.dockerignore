@@ -1,7 +1,5 @@
-node_modules/
-dist/
-build/
-*.log
+bin/
+tmp/
+*.test
+.git
 .env
-.env.local
-.DS_Store

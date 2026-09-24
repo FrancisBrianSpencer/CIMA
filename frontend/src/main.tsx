@@ -1,2 +1,10 @@
-import React from 'react'; import {createRoot} from 'react-dom/client'; import './styles.css';
-function App(){return <main><p className="eyebrow">CIMA v0.1.0</p><h1>Control Interno y Monitoreo de Adultos Mayores</h1><p>La base del proyecto está funcionando con React, Go y MongoDB.</p><section><h2>Próximamente</h2><ul><li>Autenticación y roles</li><li>Residentes y habitaciones</li><li>Información médica y medicamentos</li><li>Estadías, cargos y pagos</li></ul></section></main>} createRoot(document.getElementById('root')!).render(<React.StrictMode><App/></React.StrictMode>);
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./styles.css";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

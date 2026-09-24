@@ -3,35 +3,58 @@ services:
     image: mongo:7
     container_name: cima-mongodb
     restart: unless-stopped
-    ports: ["27017:27017"]
-    volumes: ["cima_mongo_data:/data/db"]
-    networks: [cima-network]
+    environment:
+      MONGO_INITDB_DATABASE: cima
+    ports:
+      - "27017:27017"
+    volumes:
+      - cima_mongo_data:/data/db
+    networks:
+      - cima-network
     healthcheck:
       test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"]
       interval: 10s
       timeout: 5s
       retries: 5
+
   backend:
-    build: ./backend
+    build:
+      context: ./backend
     container_name: cima-backend
+    restart: unless-stopped
     environment:
-      APP_PORT: 8080
-      MONGO_URI: mongodb://mongodb:27017
-      MONGO_DATABASE: cima
-    ports: ["8080:8080"]
+      APP_ENV: ${APP_ENV:-development}
+      APP_PORT: ${APP_PORT:-8080}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      MONGO_DATABASE: ${MONGO_DATABASE:-cima}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      JWT_SECRET: ${JWT_SECRET:-change-this-development-secret}
+    ports:
+      - "8080:8080"
     depends_on:
       mongodb:
         condition: service_healthy
-    networks: [cima-network]
+    networks:
+      - cima-network
+
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8080/api/v1
     container_name: cima-frontend
-    ports: ["5173:80"]
-    depends_on: [backend]
-    networks: [cima-network]
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - cima-network
+
 networks:
   cima-network:
     name: cima-network
+
 volumes:
   cima_mongo_data:
     name: cima-mongo-data
