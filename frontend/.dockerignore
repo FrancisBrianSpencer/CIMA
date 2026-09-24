@@ -1,7 +1,4 @@
 node_modules/
 dist/
-build/
-*.log
+.git
 .env
-.env.local
-.DS_Store
