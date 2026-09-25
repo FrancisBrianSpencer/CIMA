@@ -61,15 +61,20 @@ export default function App() {
   const [profile, setProfile] = useState<ResidentProfile>(emptyProfile);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [residentSaving, setResidentSaving] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [residentError, setResidentError] = useState("");
+  const [residentSuccess, setResidentSuccess] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
 
@@ -162,6 +167,10 @@ export default function App() {
 
   async function selectResident(resident: Resident) {
     setSelectedResident(resident);
+    setEditFirstName(resident.firstName);
+    setEditLastName(resident.lastName);
+    setResidentError("");
+    setResidentSuccess("");
     setProfile(emptyProfile);
     setProfileLoaded(false);
     setProfileLoading(true);
@@ -193,6 +202,100 @@ export default function App() {
       );
     } finally {
       setProfileLoading(false);
+    }
+  }
+
+  async function handleResidentUpdate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedResident) return;
+
+    const cleanFirstName = editFirstName.trim();
+    const cleanLastName = editLastName.trim();
+    if (!cleanFirstName || !cleanLastName) {
+      setResidentError("Nombre y apellido son obligatorios.");
+      return;
+    }
+
+    setResidentError("");
+    setResidentSuccess("");
+    setResidentSaving(true);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/residents/${encodeURIComponent(selectedResident.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            firstName: cleanFirstName,
+            lastName: cleanLastName,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await getApiError(response, "No se pudo actualizar el residente.")
+        );
+      }
+
+      const updatedResident = (await response.json()) as Resident;
+      setSelectedResident(updatedResident);
+      setResidents((current) =>
+        current.map((resident) =>
+          resident.id === updatedResident.id ? updatedResident : resident
+        )
+      );
+      setEditFirstName(updatedResident.firstName);
+      setEditLastName(updatedResident.lastName);
+      setResidentSuccess("Residente actualizado correctamente.");
+    } catch (err) {
+      setResidentError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo actualizar el residente."
+      );
+    } finally {
+      setResidentSaving(false);
+    }
+  }
+
+  async function archiveResident(resident: Resident) {
+    if (resident.status === "archived") return;
+    const fullName = `${resident.firstName} ${resident.lastName}`;
+    if (!window.confirm(`¿Archivar a ${fullName}?`)) return;
+
+    setResidentError("");
+    setResidentSuccess("");
+
+    try {
+      const response = await fetch(
+        `${API_URL}/residents/${encodeURIComponent(resident.id)}`,
+        { method: "DELETE" }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await getApiError(response, "No se pudo archivar el residente.")
+        );
+      }
+
+      const archivedResident = { ...resident, status: "archived" };
+      setResidents((current) =>
+        current.map((item) =>
+          item.id === archivedResident.id ? archivedResident : item
+        )
+      );
+      setSelectedResident((current) =>
+        current?.id === archivedResident.id ? archivedResident : current
+      );
+      setResidentSuccess("Residente archivado. Sus datos se conservaron.");
+    } catch (err) {
+      setResidentError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo archivar el residente."
+      );
     }
   }
 
@@ -358,7 +461,13 @@ export default function App() {
 
                   <div className="resident-actions">
                     <span className={`status status-${resident.status}`}>
-                      {resident.status === "active" ? "Activo" : resident.status}
+                      {resident.status === "active"
+                        ? "Activo"
+                        : resident.status === "inactive"
+                          ? "Inactivo"
+                          : resident.status === "archived"
+                            ? "Archivado"
+                            : resident.status}
                     </span>
                     <button
                       type="button"
@@ -367,6 +476,15 @@ export default function App() {
                     >
                       Ver ficha
                     </button>
+                    {resident.status !== "archived" && (
+                      <button
+                        type="button"
+                        onClick={() => void archiveResident(resident)}
+                        aria-label={`Archivar a ${resident.firstName} ${resident.lastName}`}
+                      >
+                        Archivar
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
@@ -391,6 +509,46 @@ export default function App() {
                 {profileLoading ? "Cargando..." : "Recargar ficha"}
               </button>
             </div>
+
+            <form
+              className="resident-identity-form"
+              onSubmit={handleResidentUpdate}
+            >
+              <fieldset disabled={residentSaving}>
+                <legend>Identificación</legend>
+                <div className="profile-fields">
+                  <label htmlFor="resident-edit-first-name">Nombre</label>
+                  <input
+                    id="resident-edit-first-name"
+                    autoComplete="given-name"
+                    value={editFirstName}
+                    onChange={(event) => setEditFirstName(event.target.value)}
+                    required
+                  />
+                  <label htmlFor="resident-edit-last-name">Apellido</label>
+                  <input
+                    id="resident-edit-last-name"
+                    autoComplete="family-name"
+                    value={editLastName}
+                    onChange={(event) => setEditLastName(event.target.value)}
+                    required
+                  />
+                </div>
+              </fieldset>
+              {residentError && (
+                <p className="error" role="alert">
+                  {residentError}
+                </p>
+              )}
+              {residentSuccess && (
+                <p className="success" role="status">
+                  {residentSuccess}
+                </p>
+              )}
+              <button type="submit" disabled={residentSaving}>
+                {residentSaving ? "Guardando..." : "Guardar identificación"}
+              </button>
+            </form>
 
             {profileLoading ? (
               <p role="status">Cargando ficha...</p>
