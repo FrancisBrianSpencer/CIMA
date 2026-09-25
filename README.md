@@ -8,11 +8,11 @@ Centraliza residentes, habitaciones, alimentación, indicaciones médicas, medic
 
 > **Proyecto independiente:** CIMA no está asociado, afiliado ni desarrollado para terceros que utilicen nombres comerciales similares.
 
-## v0.1.1 — Foundation / Docker-only
+## Estado del proyecto — base publicada v0.3
 
-Esta versión corrige el flujo de construcción del backend para que **Go no tenga que estar instalado en Windows**. Go se utiliza dentro del contenedor de compilación de Docker, y Node.js se utiliza dentro del contenedor del frontend.
+La base publicada v0.3 incorpora Docker-only y la primera ficha personal. El trabajo actual completa el CRUD de residentes y su archivado lógico; estos cambios aún no están asociados a un nuevo release/tag.
 
-El entorno local requiere únicamente Docker Desktop y Git. No es necesario instalar directamente Go, Node.js ni MongoDB.
+El entorno requiere únicamente Docker Desktop y Git. No es necesario instalar Go, Node.js ni MongoDB directamente en el computador.
 
 ## Stack
 
@@ -148,6 +148,11 @@ CIMA/
 │   ├── tsconfig.json
 │   └── vite.config.ts
 ├── docker-compose.yml
+├── docs/
+│   ├── ESPECIFICACION_TECNICA_CIMA_v0.3.md
+│   ├── ESPECIFICACION_TECNICA_CIMA_v0.3.pdf
+│   ├── ESPECIFICACION_TECNICA_CIMA_v0.4.md
+│   └── ESPECIFICACION_TECNICA_CIMA_v0.4.pdf
 ├── .env.example
 ├── .gitignore
 ├── Makefile
@@ -188,23 +193,23 @@ CIMA/
 ### Auditoría
 Acciones relevantes como login/logout, cambios de residentes, información médica, medicamentos, administración de dosis, documentos, habitaciones, cargos/pagos y usuarios/roles.
 
-## Estado funcional de v0.1.1
+## Estado funcional actual
 
-La versión actual es una **base técnica inicial**, no todavía el MVP completo.
+El proyecto todavía no es el MVP completo. El estado de desarrollo incluye:
 
-Incluye:
 - API Go funcionando
 - Conexión con MongoDB
 - Endpoint `/health`
-- Listado y creación inicial de residentes
+- CRUD de residentes: crear, listar, consultar por ID, editar y archivar sin borrar físicamente
+- Timestamps de creación, actualización y archivado
+- Ficha personal con contactos principal y de emergencia
 - Frontend React/TypeScript
-- Formulario inicial de residentes
-- Responsive inicial
-- Modo oscuro basado en preferencias del sistema
-- Validación básica de campos requeridos
+- Edición de identidad y ficha; confirmación para archivar
+- Validación backend y manejo de estados de carga/error/éxito
 - Construcción completa mediante Docker
+- Pruebas unitarias Go para validaciones/JSON y pruebas manuales CRUD contra MongoDB
 
-Autenticación, RBAC, módulos médicos, medicamentos, facturación, auditoría avanzada y pruebas E2E quedan para iteraciones posteriores.
+Autenticación, RBAC, módulos médicos, medicamentos, facturación, auditoría avanzada y pruebas automatizadas de integración/E2E quedan para iteraciones posteriores. No usar datos reales de residentes antes de implementar autenticación y permisos.
 
 ## Seguridad
 
@@ -246,19 +251,19 @@ Actualmente implementado:
 GET    /health
 GET    /api/v1/residents
 POST   /api/v1/residents
+GET    /api/v1/residents/{id}
+PATCH  /api/v1/residents/{id}
+DELETE /api/v1/residents/{id}                 # archivado lógico
+GET    /api/v1/residents/{id}/profile
+PATCH  /api/v1/residents/{id}/profile
 ```
 
-API prevista:
+API prevista, todavía no implementada:
 ```text
 POST   /auth/login
 POST   /auth/refresh
 POST   /auth/logout
 GET    /auth/me
-GET    /residents
-POST   /residents
-GET    /residents/:id
-PATCH  /residents/:id
-DELETE /residents/:id
 GET    /rooms
 POST   /rooms
 POST   /rooms/:id/assign

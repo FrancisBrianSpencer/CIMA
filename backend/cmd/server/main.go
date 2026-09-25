@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/mail"
 	"net/http"
@@ -22,6 +23,21 @@ type Resident struct {
 	FirstName string      `json:"firstName" bson:"firstName"`
 	LastName  string      `json:"lastName" bson:"lastName"`
 	Status    string      `json:"status" bson:"status"`
+	CreatedAt *time.Time  `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt *time.Time  `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	ArchivedAt *time.Time  `json:"archivedAt,omitempty" bson:"archivedAt,omitempty"`
+}
+
+type ResidentCreate struct {
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Status    string `json:"status"`
+}
+
+type ResidentPatch struct {
+	FirstName *string `json:"firstName"`
+	LastName  *string `json:"lastName"`
+	Status    *string `json:"status"`
 }
 
 type ResidentContact struct {
@@ -102,22 +118,52 @@ func main() {
 			writeJSON(w, http.StatusOK, residents)
 		})
 
-		r.Post("/", func(w http.ResponseWriter, req *http.Request) {
-			var resident Resident
-			if err := json.NewDecoder(req.Body).Decode(&resident); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		r.Get("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			residentID, ok := parseResidentID(w, req)
+			if !ok {
 				return
 			}
 
-			resident.FirstName = strings.TrimSpace(resident.FirstName)
-			resident.LastName = strings.TrimSpace(resident.LastName)
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident)
+			if err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "resident not found"})
+				return
+			}
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load resident"})
+				return
+			}
+			writeJSON(w, http.StatusOK, resident)
+		})
+
+		r.Post("/", func(w http.ResponseWriter, req *http.Request) {
+			var input ResidentCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+
+			resident := Resident{
+				FirstName: strings.TrimSpace(input.FirstName),
+				LastName:  strings.TrimSpace(input.LastName),
+				Status:    strings.TrimSpace(input.Status),
+			}
 			if resident.FirstName == "" || resident.LastName == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "firstName and lastName are required"})
 				return
 			}
 			if resident.Status == "" {
 				resident.Status = "active"
+			} else if !validResidentStatus(resident.Status) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be active or inactive"})
+				return
 			}
+			now := time.Now().UTC()
+			resident.CreatedAt = &now
+			resident.UpdatedAt = &now
 
 			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 			defer cancel()
@@ -130,6 +176,95 @@ func main() {
 
 			resident.ID = result.InsertedID
 			writeJSON(w, http.StatusCreated, resident)
+		})
+
+		r.Patch("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			residentID, ok := parseResidentID(w, req)
+			if !ok {
+				return
+			}
+
+			var patch ResidentPatch
+			if !decodeStrictJSON(w, req, &patch) {
+				return
+			}
+
+			updates := bson.M{}
+			if patch.FirstName != nil {
+				firstName := strings.TrimSpace(*patch.FirstName)
+				if firstName == "" {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "firstName cannot be empty"})
+					return
+				}
+				updates["firstName"] = firstName
+			}
+			if patch.LastName != nil {
+				lastName := strings.TrimSpace(*patch.LastName)
+				if lastName == "" {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lastName cannot be empty"})
+					return
+				}
+				updates["lastName"] = lastName
+			}
+			if patch.Status != nil {
+				status := strings.TrimSpace(*patch.Status)
+				if !validResidentStatus(status) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be active or inactive"})
+					return
+				}
+				updates["status"] = status
+			}
+			if len(updates) == 0 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one resident field is required"})
+				return
+			}
+			updates["updatedAt"] = time.Now().UTC()
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			err := collection.FindOneAndUpdate(
+				ctx,
+				bson.M{"_id": residentID},
+				bson.M{"$set": updates},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			).Decode(&resident)
+			if err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "resident not found"})
+				return
+			}
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update resident"})
+				return
+			}
+			writeJSON(w, http.StatusOK, resident)
+		})
+
+		r.Delete("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			residentID, ok := parseResidentID(w, req)
+			if !ok {
+				return
+			}
+
+			now := time.Now().UTC()
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			result, err := collection.UpdateOne(ctx, bson.M{"_id": residentID}, bson.M{"$set": bson.M{
+				"status":     "archived",
+				"archivedAt": now,
+				"updatedAt":  now,
+			}})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to archive resident"})
+				return
+			}
+			if result.MatchedCount == 0 {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "resident not found"})
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		})
 
 		r.Route("/{id}/profile", func(r chi.Router) {
@@ -241,6 +376,24 @@ func parseResidentID(w http.ResponseWriter, req *http.Request) (primitive.Object
 	return residentID, true
 }
 
+func decodeStrictJSON(w http.ResponseWriter, req *http.Request, destination any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request must contain one JSON object"})
+		return false
+	}
+	return true
+}
+
+func validResidentStatus(status string) bool {
+	return status == "active" || status == "inactive"
+}
+
 func addContactUpdates(updates bson.M, prefix string, contact *ContactPatch) {
 	if contact == nil {
 		return
@@ -297,7 +450,7 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 			if origin != "" && origin == allowedOrigin {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			}
 
