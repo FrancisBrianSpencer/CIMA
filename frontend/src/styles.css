@@ -1,19 +1,217 @@
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
   color-scheme: light dark;
 }
-* { box-sizing: border-box; }
-body { margin: 0; background: Canvas; color: CanvasText; }
-.page { min-height: 100vh; padding: 1rem; }
-.container { width: min(100%, 720px); margin: 0 auto; }
-.eyebrow { font-weight: 700; letter-spacing: 0.08em; }
-.card { margin-top: 1rem; padding: 1rem; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: 0.75rem; }
-form { display: grid; gap: 0.5rem; }
-input, button { min-height: 44px; font: inherit; }
-input { padding: 0.65rem; }
-button { margin-top: 0.5rem; padding: 0.65rem 1rem; cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
-.error { padding: 0.75rem; border: 1px solid currentColor; border-radius: 0.5rem; }
-.resident-list { display: grid; gap: 0.75rem; padding: 0; list-style: none; }
-.resident-list li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.75rem; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 0.5rem; }
-@media (min-width: 640px) { .page { padding: 2rem; } .card { padding: 1.5rem; } }
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+input {
+  min-height: 44px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 2px;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 1rem;
+}
+
+.container {
+  width: min(100%, 900px);
+  margin: 0 auto;
+}
+
+.eyebrow {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid
+    color-mix(in srgb, CanvasText 25%, transparent);
+  border-radius: 0.75rem;
+}
+
+form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+input {
+  width: 100%;
+  padding: 0.65rem;
+}
+
+form button {
+  margin-top: 0.5rem;
+  padding: 0.65rem 1rem;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.section-heading button {
+  padding: 0.5rem 0.75rem;
+}
+
+button {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid color-mix(in srgb, CanvasText 35%, transparent);
+  border-radius: 0.25rem;
+  background: Canvas;
+  color: CanvasText;
+  font-weight: 600;
+}
+
+button:hover:not(:disabled) {
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+}
+
+.error,
+.success {
+  padding: 0.75rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}
+
+.resident-list {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.resident-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid
+    color-mix(in srgb, CanvasText 20%, transparent);
+  border-radius: 0.5rem;
+}
+
+.resident-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.status {
+  display: inline-block;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.status-active {
+  font-weight: 700;
+}
+
+.profile-card form {
+  margin-top: 1rem;
+}
+
+.profile-card fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 1rem 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
+}
+
+.profile-card legend {
+  padding: 0 0.5rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.profile-fields {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.7fr) minmax(0, 1.3fr);
+  align-items: center;
+  gap: 0.65rem 1rem;
+}
+
+.profile-fields input {
+  min-width: 0;
+}
+
+.profile-card form > button[type="submit"] {
+  justify-self: start;
+  min-width: 10rem;
+}
+
+@media (min-width: 640px) {
+  .page {
+    padding: 2rem;
+  }
+
+  .card {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .resident-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .profile-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+
+  .profile-fields input {
+    margin-bottom: 0.5rem;
+  }
+}
