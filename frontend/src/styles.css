@@ -25,7 +25,7 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled, input:disabled { cursor: not-allowed; opacity: 0.62; }
 button:focus-visible, input:focus-visible { outline: 3px solid #d6a84c; outline-offset: 2px; }
-input { width: 100%; min-width: 0; min-height: 46px; padding: 0.7rem 0.8rem; border: 1px solid #cad6d0; border-radius: 4px; background: #fff; color: var(--ink); }
+input, select { width: 100%; min-width: 0; min-height: 46px; padding: 0.7rem 0.8rem; border: 1px solid #cad6d0; border-radius: 4px; background: #fff; color: var(--ink); }
 label { color: #40524d; font-size: 0.88rem; font-weight: 600; }
 h1, h2, p { margin-top: 0; }
 h1, h2 { color: var(--ink); }
@@ -120,6 +120,22 @@ h1, h2 { color: var(--ink); }
 .resident-list { display: grid; gap: 0.55rem; padding: 0; list-style: none; }
 .resident-list li { display: flex; min-height: 66px; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.8rem 0.9rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .resident-actions { display: flex; align-items: center; gap: 0.55rem; }
+.room-summary { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 0.45rem 1rem; }
+.room-summary span { color: var(--muted); font-size: 0.82rem; }
+.room-record { display: grid; width: 100%; gap: 0.7rem; }
+.room-record-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.room-occupant { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0.7rem; border-left: 2px solid #9bb8a6; background: #f2f6f3; font-size: 0.84rem; }
+.room-occupant button, .room-assign-controls button, .room-history-toggle { min-height: 36px; padding: 0.4rem 0.7rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); font-size: 0.78rem; font-weight: 600; }
+.room-assign-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.55rem; }
+.room-assign-controls select { min-height: 40px; padding: 0.45rem 0.65rem; }
+.room-history-toggle { justify-self: start; color: var(--forest); }
+.room-history-list { display: grid; gap: 0.45rem; margin: 0; padding: 0.75rem 0.75rem 0.75rem 2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.78rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+.room-status-maintenance { background: #f7edd5; color: #7d5a14; }
+.room-status-closed { background: #edf0ee; color: #66736d; }
+.room-form-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.card form .secondary-action { border: 1px solid var(--line); background: #fff; color: var(--ink); }
+.card form .secondary-action:hover:not(:disabled) { background: #edf2ee; }
 .resident-actions button { min-height: 38px; padding: 0.4rem 0.7rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); font-size: 0.8rem; font-weight: 600; }
 .status { display: inline-block; padding: 0.3rem 0.55rem; border-radius: 999px; background: #e1efe5; color: #2b6847; font-size: 0.74rem; font-weight: 700; }
 .status-inactive, .status-archived { background: #edf0ee; color: #66736d; }
@@ -128,6 +144,15 @@ h1, h2 { color: var(--ink); }
 .profile-card legend { padding-right: 0.5rem; color: var(--forest); font-size: 0.92rem; font-weight: 700; }
 .profile-fields { display: grid; grid-template-columns: minmax(9rem, 0.7fr) minmax(0, 1.3fr); align-items: center; gap: 0.65rem 1rem; }
 .read-only-note { margin: 1rem 0 0; color: var(--muted); font-size: 0.84rem; }
+.date-input-wrap { position: relative; display: flex; min-width: 0; gap: 0.3rem; align-items: center; }
+.date-input-wrap > input[type="text"] { padding-right: 3rem; }
+.profile-card form .date-input-wrap > .date-picker-button { position: absolute; top: 0; right: 0; display: grid; width: 44px; height: 46px; min-height: 46px; margin: 0; padding: 0; place-items: center; border: 0; border-radius: 0 4px 4px 0; background: var(--forest); color: #fff; }
+.profile-card form .date-input-wrap > .date-picker-button:hover { background: var(--forest-deep); }
+.calendar-icon { position: relative; width: 18px; height: 17px; border: 1.5px solid currentColor; border-radius: 3px; }
+.calendar-icon::before { position: absolute; top: 4px; right: 0; left: 0; border-top: 1.5px solid currentColor; content: ""; }
+.calendar-icon::after { position: absolute; top: -3px; left: 4px; width: 7px; height: 4px; border-right: 1.5px solid currentColor; border-left: 1.5px solid currentColor; content: ""; }
+.native-date-picker { position: absolute; top: 0; right: 0; width: 44px; height: 46px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.date-format-hint { color: var(--muted); font-size: 0.72rem; }
 .module-placeholder { width: min(100%, 900px); margin: 5rem auto; padding: 2rem 0; border-top: 1px solid var(--line); }
 .module-placeholder h2 { font-family: "DM Serif Display", Georgia, serif; font-size: 2rem; font-weight: 400; }
 .module-placeholder p:last-child { max-width: 560px; color: var(--muted); line-height: 1.65; }
@@ -165,6 +190,8 @@ h1, h2 { color: var(--ink); }
   .resident-list li { align-items: flex-start; flex-direction: column; }
   .resident-actions { width: 100%; flex-wrap: wrap; }
   .resident-actions button { flex: 1; }
+  .room-record-heading { align-items: flex-start; flex-direction: column; }
+  .room-assign-controls { grid-template-columns: minmax(0, 1fr); }
   .profile-fields { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
   .profile-fields input { margin-bottom: 0.45rem; }
   .header-user { font-size: 0; }

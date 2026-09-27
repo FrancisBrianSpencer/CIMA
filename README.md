@@ -8,9 +8,9 @@ Centraliza residentes, habitaciones, alimentación, indicaciones médicas, medic
 
 > **Proyecto independiente:** CIMA no está asociado, afiliado ni desarrollado para terceros que utilicen nombres comerciales similares.
 
-## Estado del proyecto — base publicada v0.3
+## Estado del proyecto — base publicada v0.3, desarrollo posterior en curso
 
-La base publicada v0.3 incorpora Docker-only y la primera ficha personal. El trabajo actual completa el CRUD de residentes y su archivado lógico; estos cambios aún no están asociados a un nuevo release/tag.
+La última versión publicada con release/tag sigue siendo v0.3. El árbol de trabajo ya incluye CRUD y ficha de residentes, autenticación JWT, RBAC inicial, una primera interfaz de dashboard y pruebas de integración API/MongoDB aisladas; estos avances aún no se han asociado a un nuevo release/tag. El estado detallado está en [la especificación técnica v0.5](docs/ESPECIFICACION_TECNICA_CIMA_v0.5.md) y su [versión PDF](docs/ESPECIFICACION_TECNICA_CIMA_v0.5.pdf).
 
 El entorno requiere únicamente Docker Desktop y Git. No es necesario instalar Go, Node.js ni MongoDB directamente en el computador.
 
@@ -20,9 +20,9 @@ El entorno requiere únicamente Docker Desktop y Git. No es necesario instalar G
 - React + TypeScript + Vite
 - MongoDB
 - Docker + Docker Compose
-- Preparado para JWT + refresh token + Argon2id
-- Preparado para Zod + go-playground/validator
-- Preparado para Vitest + Playwright + Testify
+- JWT HS256, refresh token y bcrypt implementados; RBAC backend por permiso
+- Vitest, pruebas Go e integración API/MongoDB implementadas; pruebas E2E pendientes
+- Interfaz y mensajes en español, UTF-8 y locale `es-CL`
 - GitHub Actions
 
 ## Inicio rápido con Docker
@@ -111,6 +111,7 @@ docker compose logs -f
 docker compose logs -f backend
 docker compose logs -f frontend
 docker compose build --no-cache
+docker compose --profile integration run --rm integration-tests
 ```
 
 ## Variables de entorno
@@ -132,6 +133,8 @@ CORS_ORIGIN=http://localhost:5173
 CIMA/
 ├── backend/
 │   ├── cmd/server/main.go
+│   ├── cmd/server/main_test.go
+│   ├── cmd/server/api_integration_test.go
 │   ├── Dockerfile
 │   ├── .dockerignore
 │   ├── go.mod
@@ -149,10 +152,9 @@ CIMA/
 │   └── vite.config.ts
 ├── docker-compose.yml
 ├── docs/
-│   ├── ESPECIFICACION_TECNICA_CIMA_v0.3.md
-│   ├── ESPECIFICACION_TECNICA_CIMA_v0.3.pdf
-│   ├── ESPECIFICACION_TECNICA_CIMA_v0.4.md
-│   └── ESPECIFICACION_TECNICA_CIMA_v0.4.pdf
+│   ├── ESPECIFICACION_TECNICA_CIMA_v0.3.md / .pdf
+│   ├── ESPECIFICACION_TECNICA_CIMA_v0.4.md / .pdf
+│   └── ESPECIFICACION_TECNICA_CIMA_v0.5.md / .pdf
 ├── .env.example
 ├── .gitignore
 ├── Makefile
@@ -201,28 +203,38 @@ El proyecto todavía no es el MVP completo. El estado de desarrollo incluye:
 - Conexión con MongoDB
 - Endpoint `/health`
 - CRUD de residentes: crear, listar, consultar por ID, editar y archivar sin borrar físicamente
+- Habitaciones: catálogo, asignación/liberación, ocupación y trazabilidad; protegidas por RBAC
 - Timestamps de creación, actualización y archivado
 - Ficha personal con contactos principal y de emergencia
 - Frontend React/TypeScript
 - Edición de identidad y ficha; confirmación para archivar
 - Validación backend y manejo de estados de carga/error/éxito
 - Construcción completa mediante Docker
-- Pruebas unitarias Go para validaciones/JSON y pruebas manuales CRUD contra MongoDB
-- Base de autenticación con JWT, refresh token y usuario administrador inicial
-- Endpoints de login, refresh y perfil autenticado
+- Pruebas unitarias Go de validaciones, JWT y RBAC; pruebas Vitest para permisos y fechas
+- Login, refresh, perfil autenticado, gestión de usuarios por API y permisos por endpoint
+- Login web y dashboard inicial con módulos visibles según permisos
+- Fechas de ficha en formato `dd/mm/aaaa`, con autoformato y calendario; API conserva `AAAA-MM-DD`
+- Mensajes del usuario en español; documento declarado UTF-8 y `es-CL`
 
-La próxima iteración continúa con usuarios, RBAC granular, políticas por rol y auditoría. No usar datos reales de residentes antes de implementar autenticación y permisos.
+Estadías, alimentación, atención clínica, medicamentos, auditoría, documentos y facturación aún están pendientes o tienen rutas placeholder. El siguiente módulo recomendado es estadías, vinculadas al historial de habitaciones. No usar datos reales de residentes: aún faltan controles de seguridad y privacidad para producción.
 
 ## Seguridad
 
-Objetivos:
+Implementado:
+- bcrypt para contraseñas, JWT de acceso (15 minutos) y refresh (7 días)
+- Middleware RBAC backend y restricciones de CORS para origen y encabezados autorizados
+- DTOs estrictos en endpoints que decodifican JSON y límite de 1 MiB
+
+Pendiente antes de producción:
 - Contraseñas con Argon2id.
 - Validación crítica también en backend.
 - Consultas MongoDB construidas explícitamente.
 - No aceptar filtros BSON arbitrarios desde el cliente.
 - Documentos médicos en almacenamiento privado.
 - No secretos en frontend ni Git.
-- Autenticación y autorización por permisos.
+- Revocación/logout de refresh tokens, rotación y reducción de riesgos por permisos obsoletos en JWT.
+- Secreto fuerte obligatorio por ambiente; retirar el secreto fallback y cambiar credenciales semilla.
+- Auditoría real de accesos y cambios sensibles.
 - HTTPS, CORS restrictivo, rate limiting y cabeceras de seguridad en producción.
 - No registrar información médica sensible.
 
@@ -248,12 +260,13 @@ Objetivo **WCAG 2.2 AA**:
 
 Base: `/api/v1`
 
-Actualmente implementado:
+Actualmente implementado (las rutas de negocio indicadas requieren bearer token y permiso):
 ```text
 GET    /health
 POST   /auth/login
 POST   /auth/refresh
 GET    /auth/me
+GET/POST/PATCH  /api/v1/users
 GET    /api/v1/residents
 POST   /api/v1/residents
 GET    /api/v1/residents/{id}
@@ -261,18 +274,27 @@ PATCH  /api/v1/residents/{id}
 DELETE /api/v1/residents/{id}                 # archivado lógico
 GET    /api/v1/residents/{id}/profile
 PATCH  /api/v1/residents/{id}/profile
+GET    /api/v1/rooms
+POST   /api/v1/rooms
+GET    /api/v1/rooms/{id}
+PATCH  /api/v1/rooms/{id}
+POST   /api/v1/rooms/{id}/assign
+POST   /api/v1/rooms/{id}/release
+GET    /api/v1/rooms/{id}/history
+GET    /api/v1/dashboard                      # respuesta de estado inicial
+GET    /api/v1/audit                           # respuesta de estado inicial
+GET/POST /api/v1/documents                    # lectura placeholder; escritura HTTP 501
+GET/POST /api/v1/billing                      # lectura placeholder; escritura HTTP 501
+GET/POST /api/v1/medical                      # lectura placeholder; escritura HTTP 501
+GET/POST /api/v1/medication-events            # lectura placeholder; escritura HTTP 501
 ```
 
-API prevista, todavía no implementada:
+Las operaciones de usuarios requieren `user.read` o `user.write`; las demás usan permisos como `resident.read`, `room.write`, `medical.read`, `billing.read`, `document.read`, `medication.read`, `audit.read` y `dashboard.read`. Asignar/liberar habitaciones requiere `room.write` y `resident.read`. El rol admin omite la comprobación granular. Las rutas placeholder no representan módulos funcionales.
+
+Pendiente en API:
 ```text
 POST   /auth/logout
-GET    /rooms
-POST   /rooms
-POST   /rooms/:id/assign
-POST   /rooms/:id/release
-GET    /medication-events
 POST   /medication-events/:id/administer
-GET    /dashboard
 GET    /dashboard/alerts
 ```
 

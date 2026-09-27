@@ -51,6 +51,39 @@ services:
     networks:
       - cima-network
 
+  backend-integration:
+    build:
+      context: ./backend
+    profiles: ["integration"]
+    environment:
+      APP_ENV: test
+      APP_PORT: 8081
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DATABASE: cima_integration
+      CORS_ORIGIN: http://localhost:5173
+      JWT_SECRET: integration-only-secret
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - cima-network
+
+  integration-tests:
+    build:
+      context: ./backend
+      target: builder
+    profiles: ["integration"]
+    command: ["go", "test", "./...", "-run", "^TestAPIIntegration$", "-count=1"]
+    environment:
+      API_BASE_URL: http://backend-integration:8081
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DATABASE: cima_integration
+    depends_on:
+      backend-integration:
+        condition: service_started
+    networks:
+      - cima-network
+
 networks:
   cima-network:
     name: cima-network
