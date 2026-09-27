@@ -208,8 +208,10 @@ El proyecto todavía no es el MVP completo. El estado de desarrollo incluye:
 - Validación backend y manejo de estados de carga/error/éxito
 - Construcción completa mediante Docker
 - Pruebas unitarias Go para validaciones/JSON y pruebas manuales CRUD contra MongoDB
+- Base de autenticación con JWT, refresh token y usuario administrador inicial
+- Endpoints de login, refresh y perfil autenticado
 
-Autenticación, RBAC, módulos médicos, medicamentos, facturación, auditoría avanzada y pruebas automatizadas de integración/E2E quedan para iteraciones posteriores. No usar datos reales de residentes antes de implementar autenticación y permisos.
+La próxima iteración continúa con usuarios, RBAC granular, políticas por rol y auditoría. No usar datos reales de residentes antes de implementar autenticación y permisos.
 
 ## Seguridad
 
@@ -249,6 +251,9 @@ Base: `/api/v1`
 Actualmente implementado:
 ```text
 GET    /health
+POST   /auth/login
+POST   /auth/refresh
+GET    /auth/me
 GET    /api/v1/residents
 POST   /api/v1/residents
 GET    /api/v1/residents/{id}
@@ -260,10 +265,7 @@ PATCH  /api/v1/residents/{id}/profile
 
 API prevista, todavía no implementada:
 ```text
-POST   /auth/login
-POST   /auth/refresh
 POST   /auth/logout
-GET    /auth/me
 GET    /rooms
 POST   /rooms
 POST   /rooms/:id/assign
@@ -317,10 +319,11 @@ E2E mínimo:
 
 - **v0.1.0 Foundation:** Docker Compose, MongoDB, Go API, React/TypeScript, health y base de residentes.
 - **v0.1.1 Docker-only Foundation:** build del backend dentro de Docker y README introductorio actualizado.
-- **v0.2.0 Medical**
-- **v0.3.0 Medication**
-- **v0.4.0 Billing**
-- **v0.5.0 Audit & Security**
+- **v0.2.0 Authentication & roles:** login JWT, refresh token, usuario administrador inicial y perfil autenticado.
+- **v0.3.0 Medical**
+- **v0.4.0 Medication**
+- **v0.5.0 Billing**
+- **v0.6.0 Audit & Security**
 - **v1.0.0 Production MVP**
 
 ## Privacidad
