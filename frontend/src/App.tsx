@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   apiFetch,
   authenticate,
@@ -7,6 +7,12 @@ import {
   hasStoredSession,
   type AuthUser,
 } from "./auth";
+import {
+  formatDateForDisplay,
+  formatDateInput,
+  localDateToISO,
+  parseSpanishDate,
+} from "./dates";
 
 // ResidentStatus representa el estado operativo del residente dentro del sistema.
 type ResidentStatus = "active" | "inactive";
@@ -17,6 +23,24 @@ type Resident = {
   firstName: string;
   lastName: string;
   status: ResidentStatus | string;
+};
+
+type RoomStatus = "available" | "maintenance" | "closed";
+
+type Room = {
+  id: string;
+  code: string;
+  capacity: number;
+  status: RoomStatus;
+  occupancy: number;
+  occupantIds?: string[];
+};
+
+type RoomAssignmentEvent = {
+  residentId: string;
+  action: "assigned" | "released";
+  actor: string;
+  changedAt: string;
 };
 
 type Contact = {
@@ -89,6 +113,25 @@ async function getApiError(response: Response, fallback: string) {
   }
 }
 
+// userFacingError reemplaza fallos técnicos del navegador por una explicación en español.
+function userFacingError(error: unknown, fallback: string) {
+  if (error instanceof TypeError) {
+    return "No se pudo conectar con el sistema. Revisa tu conexión e inténtalo nuevamente.";
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+// profileForDisplay mantiene la fecha de nacimiento en formato chileno dentro de la interfaz.
+function profileForDisplay(data: Partial<ResidentProfile>): ResidentProfile {
+  return {
+    ...emptyProfile,
+    ...data,
+    dateOfBirth: formatDateForDisplay(data.dateOfBirth ?? ""),
+    primaryContact: { ...emptyContact, ...data.primaryContact },
+    emergencyContact: { ...emptyContact, ...data.emergencyContact },
+  };
+}
+
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
@@ -100,8 +143,21 @@ export default function App() {
   const [dashboardStatus, setDashboardStatus] = useState("");
   const [dashboardError, setDashboardError] = useState("");
   const [residents, setResidents] = useState<Resident[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
+  const [roomsSaving, setRoomsSaving] = useState(false);
+  const [roomError, setRoomError] = useState("");
+  const [roomSuccess, setRoomSuccess] = useState("");
+  const [roomCode, setRoomCode] = useState("");
+  const [roomCapacity, setRoomCapacity] = useState("1");
+  const [roomStatus, setRoomStatus] = useState<RoomStatus>("available");
+  const [editingRoomId, setEditingRoomId] = useState("");
+  const [roomResidentSelection, setRoomResidentSelection] = useState<Record<string, string>>({});
+  const [roomHistory, setRoomHistory] = useState<Record<string, RoomAssignmentEvent[]>>({});
+  const [visibleRoomHistory, setVisibleRoomHistory] = useState("");
   const [selectedResident, setSelectedResident] = useState<Resident | null>(null);
   const [profile, setProfile] = useState<ResidentProfile>(emptyProfile);
+  const datePickerRef = useRef<HTMLInputElement>(null);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [editFirstName, setEditFirstName] = useState("");
@@ -173,9 +229,7 @@ export default function App() {
       setLoginPassword("");
       setActiveView("dashboard");
     } catch (err) {
-      setLoginError(
-        err instanceof Error ? err.message : "No se pudo iniciar sesión."
-      );
+      setLoginError(userFacingError(err, "No se pudo iniciar sesión."));
     } finally {
       setLoginSaving(false);
     }
@@ -215,11 +269,7 @@ export default function App() {
       const data = (await response.json()) as Resident[];
       setResidents(data);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudieron cargar los residentes."
-      );
+      setError(userFacingError(err, "No se pudieron cargar los residentes."));
     } finally {
       setLoading(false);
     }
@@ -230,6 +280,130 @@ export default function App() {
     if (user && hasPermission(user, "resident.read")) void loadResidents();
   }, [loadResidents]);
 
+  // loadRooms obtiene el catálogo usando el permiso de lectura de habitaciones.
+  const loadRooms = useCallback(async () => {
+    if (!hasPermission(user, "room.read")) return;
+    setRoomsLoading(true);
+    setRoomError("");
+    try {
+      const response = await apiFetch("/rooms/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las habitaciones."));
+      }
+      const data = (await response.json()) as Room[];
+      setRooms(data.sort((left, right) => left.code.localeCompare(right.code, "es-CL")));
+    } catch (err) {
+      setRoomError(userFacingError(err, "No se pudieron cargar las habitaciones."));
+    } finally {
+      setRoomsLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && activeView === "rooms") void loadRooms();
+  }, [user, activeView, loadRooms]);
+
+  // updateRoomAssignment asigna o libera residentes mediante las rutas protegidas de habitaciones.
+  async function updateRoomAssignment(roomId: string, residentId: string, action: "assign" | "release") {
+    if (!residentId) {
+      setRoomError("Selecciona un residente activo.");
+      return;
+    }
+    setRoomError("");
+    setRoomSuccess("");
+    setRoomsSaving(true);
+    try {
+      const response = await apiFetch(`/rooms/${encodeURIComponent(roomId)}/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ residentId }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo actualizar la asignación."));
+      }
+      setRoomSuccess(action === "assign" ? "Residente asignado a la habitación." : "Residente liberado de la habitación.");
+      setRoomResidentSelection((current) => ({ ...current, [roomId]: "" }));
+      await loadRooms();
+      if (visibleRoomHistory === roomId) await loadRoomHistory(roomId);
+    } catch (err) {
+      setRoomError(userFacingError(err, "No se pudo actualizar la asignación."));
+    } finally {
+      setRoomsSaving(false);
+    }
+  }
+
+  // loadRoomHistory muestra los eventos históricos autorizados de una habitación.
+  async function loadRoomHistory(roomId: string) {
+    setRoomError("");
+    try {
+      const response = await apiFetch(`/rooms/${encodeURIComponent(roomId)}/history`);
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo cargar el historial."));
+      }
+      const events = (await response.json()) as RoomAssignmentEvent[];
+      setRoomHistory((current) => ({ ...current, [roomId]: events }));
+      setVisibleRoomHistory(roomId);
+    } catch (err) {
+      setRoomError(userFacingError(err, "No se pudo cargar el historial."));
+    }
+  }
+
+  // handleRoomSubmit crea o actualiza una habitación validada por la API.
+  async function handleRoomSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const cleanCode = roomCode.trim();
+    const parsedCapacity = Number(roomCapacity);
+    if (!cleanCode || !Number.isInteger(parsedCapacity) || parsedCapacity < 1) {
+      setRoomError("Ingresa un código y una capacidad entera de al menos 1.");
+      return;
+    }
+
+    setRoomError("");
+    setRoomSuccess("");
+    setRoomsSaving(true);
+    try {
+      const editing = editingRoomId !== "";
+      const response = await apiFetch(
+        editing ? `/rooms/${encodeURIComponent(editingRoomId)}` : "/rooms/",
+        {
+          method: editing ? "PATCH" : "POST",
+          body: JSON.stringify({ code: cleanCode, capacity: parsedCapacity, status: roomStatus }),
+        }
+      );
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la habitación."));
+      }
+      setRoomSuccess(editing ? "Habitación actualizada." : "Habitación creada.");
+      setEditingRoomId("");
+      setRoomCode("");
+      setRoomCapacity("1");
+      setRoomStatus("available");
+      await loadRooms();
+    } catch (err) {
+      setRoomError(userFacingError(err, "No se pudo guardar la habitación."));
+    } finally {
+      setRoomsSaving(false);
+    }
+  }
+
+  // startRoomEdit carga en el formulario el catálogo de la habitación seleccionada.
+  function startRoomEdit(room: Room) {
+    setEditingRoomId(room.id);
+    setRoomCode(room.code);
+    setRoomCapacity(String(room.capacity));
+    setRoomStatus(room.status);
+    setRoomError("");
+    setRoomSuccess("");
+  }
+
+  // cancelRoomEdit limpia el formulario de edición sin modificar el registro.
+  function cancelRoomEdit() {
+    setEditingRoomId("");
+    setRoomCode("");
+    setRoomCapacity("1");
+    setRoomStatus("available");
+    setRoomError("");
+  }
+
   // loadDashboard consulta el endpoint protegido para mostrar el estado real del backend.
   useEffect(() => {
     if (!user || activeView !== "dashboard" || !hasPermission(user, "dashboard.read")) return;
@@ -239,10 +413,10 @@ export default function App() {
       .then(async (response) => {
         if (!response.ok) throw new Error(await getApiError(response, "No se pudo cargar el resumen."));
         const data = (await response.json()) as { status?: string };
-        if (mounted) setDashboardStatus(data.status ?? "Disponible");
+        if (mounted) setDashboardStatus(data.status ?? "Panel disponible");
       })
       .catch((err: unknown) => {
-        if (mounted) setDashboardError(err instanceof Error ? err.message : "No se pudo cargar el resumen.");
+        if (mounted) setDashboardError(userFacingError(err, "No se pudo cargar el resumen."));
       });
     return () => {
       mounted = false;
@@ -294,11 +468,7 @@ export default function App() {
 
       await loadResidents();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo crear el residente."
-      );
+      setError(userFacingError(err, "No se pudo crear el residente."));
     } finally {
       setSaving(false);
     }
@@ -329,17 +499,10 @@ export default function App() {
       }
 
       const data = (await response.json()) as Partial<ResidentProfile>;
-      setProfile({
-        ...emptyProfile,
-        ...data,
-        primaryContact: { ...emptyContact, ...data.primaryContact },
-        emergencyContact: { ...emptyContact, ...data.emergencyContact },
-      });
+      setProfile(profileForDisplay(data));
       setProfileLoaded(true);
     } catch (err) {
-      setProfileError(
-        err instanceof Error ? err.message : "No se pudo cargar la ficha."
-      );
+      setProfileError(userFacingError(err, "No se pudo cargar la ficha."));
     } finally {
       setProfileLoading(false);
     }
@@ -391,11 +554,7 @@ export default function App() {
       setEditLastName(updatedResident.lastName);
       setResidentSuccess("Residente actualizado correctamente.");
     } catch (err) {
-      setResidentError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo actualizar el residente."
-      );
+      setResidentError(userFacingError(err, "No se pudo actualizar el residente."));
     } finally {
       setResidentSaving(false);
     }
@@ -433,11 +592,7 @@ export default function App() {
       );
       setResidentSuccess("Residente archivado. Sus datos se conservaron.");
     } catch (err) {
-      setResidentError(
-        err instanceof Error
-          ? err.message
-          : "No se pudo archivar el residente."
-      );
+      setResidentError(userFacingError(err, "No se pudo archivar el residente."));
     }
   }
 
@@ -463,6 +618,16 @@ export default function App() {
     event.preventDefault();
     if (!selectedResident || !profileLoaded) return;
 
+    const isoDateOfBirth = parseSpanishDate(profile.dateOfBirth);
+    if (isoDateOfBirth === null) {
+      setProfileError("Ingresa una fecha válida con el formato dd/mm/aaaa.");
+      return;
+    }
+    if (isoDateOfBirth && isoDateOfBirth > localDateToISO(new Date())) {
+      setProfileError("La fecha de nacimiento no puede ser posterior a hoy.");
+      return;
+    }
+
     setProfileError("");
     setProfileSuccess("");
     setProfileSaving(true);
@@ -473,7 +638,7 @@ export default function App() {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(profile),
+          body: JSON.stringify({ ...profile, dateOfBirth: isoDateOfBirth }),
         }
       );
 
@@ -484,17 +649,10 @@ export default function App() {
       }
 
       const updatedProfile = (await response.json()) as Partial<ResidentProfile>;
-      setProfile({
-        ...emptyProfile,
-        ...updatedProfile,
-        primaryContact: { ...emptyContact, ...updatedProfile.primaryContact },
-        emergencyContact: { ...emptyContact, ...updatedProfile.emergencyContact },
-      });
+      setProfile(profileForDisplay(updatedProfile));
       setProfileSuccess("Ficha actualizada correctamente.");
     } catch (err) {
-      setProfileError(
-        err instanceof Error ? err.message : "No se pudo guardar la ficha."
-      );
+      setProfileError(userFacingError(err, "No se pudo guardar la ficha."));
     } finally {
       setProfileSaving(false);
     }
@@ -521,6 +679,15 @@ export default function App() {
     reception: "Recepción",
     accounting: "Contabilidad",
   };
+  const roomStatusLabels: Record<RoomStatus, string> = {
+    available: "Disponible",
+    maintenance: "En mantención",
+    closed: "Cerrada",
+  };
+  const assignedResidentIds = new Set(rooms.flatMap((room) => room.occupantIds ?? []));
+  const assignableResidents = residents.filter(
+    (resident) => resident.status === "active" && !assignedResidentIds.has(resident.id)
+  );
 
   if (authChecking) {
     return <main className="auth-loading" role="status">Verificando sesión...</main>;
@@ -636,6 +803,147 @@ export default function App() {
               <div className="permission-list">
                 {(user.role === "admin" ? ["Acceso administrativo"] : user.permissions ?? []).map((permission) => <span className="permission-item" key={permission}>{permissionLabel(permission)}</span>)}
               </div>
+            </section>
+          </section>
+        ) : currentView === "rooms" && hasPermission(user, "room.read") ? (
+          <section className="resident-content" aria-label="Gestión de habitaciones">
+            {hasPermission(user, "room.write") && (
+              <section className="card" aria-labelledby="room-form-title">
+                <h2 id="room-form-title">{editingRoomId ? "Editar habitación" : "Nueva habitación"}</h2>
+                <form onSubmit={handleRoomSubmit}>
+                  <label htmlFor="room-code">Código de habitación</label>
+                  <input
+                    id="room-code"
+                    value={roomCode}
+                    onChange={(event) => setRoomCode(event.target.value)}
+                    maxLength={32}
+                    required
+                    disabled={roomsSaving}
+                  />
+                  <label htmlFor="room-capacity">Capacidad</label>
+                  <input
+                    id="room-capacity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={roomCapacity}
+                    onChange={(event) => setRoomCapacity(event.target.value)}
+                    required
+                    disabled={roomsSaving}
+                  />
+                  <label htmlFor="room-status">Estado</label>
+                  <select
+                    id="room-status"
+                    value={roomStatus}
+                    onChange={(event) => setRoomStatus(event.target.value as RoomStatus)}
+                    disabled={roomsSaving}
+                  >
+                    <option value="available">Disponible</option>
+                    <option value="maintenance">En mantención</option>
+                    <option value="closed">Cerrada</option>
+                  </select>
+                  {roomError && <p className="error" role="alert">{roomError}</p>}
+                  {roomSuccess && <p className="success" role="status">{roomSuccess}</p>}
+                  <div className="room-form-actions">
+                    <button type="submit" disabled={roomsSaving}>
+                      {roomsSaving ? "Guardando..." : editingRoomId ? "Guardar cambios" : "Crear habitación"}
+                    </button>
+                    {editingRoomId && <button className="secondary-action" type="button" onClick={cancelRoomEdit}>Cancelar</button>}
+                  </div>
+                </form>
+              </section>
+            )}
+            <section className="card" aria-labelledby="rooms-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ALOJAMIENTO</p><h2 id="rooms-list-title">Habitaciones</h2></div>
+                <button type="button" onClick={() => void loadRooms()} disabled={roomsLoading}>
+                  {roomsLoading ? "Actualizando..." : "Actualizar"}
+                </button>
+              </div>
+              {roomError && !hasPermission(user, "room.write") && <p className="error" role="alert">{roomError}</p>}
+              {roomsLoading ? (
+                <p role="status">Cargando habitaciones...</p>
+              ) : rooms.length === 0 ? (
+                <p>No hay habitaciones registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {rooms.map((room) => (
+                    <li key={room.id}>
+                      <div className="room-record">
+                        <div className="room-record-heading">
+                          <div className="room-summary">
+                            <strong>{room.code}</strong>
+                            <span>Ocupación: {room.occupancy} de {room.capacity}</span>
+                          </div>
+                          <div className="resident-actions">
+                            <span className={`status room-status-${room.status}`}>{roomStatusLabels[room.status]}</span>
+                            {hasPermission(user, "room.write") && <button type="button" onClick={() => startRoomEdit(room)}>Editar</button>}
+                          </div>
+                        </div>
+                        {room.occupantIds?.map((residentId) => {
+                          const resident = residents.find((item) => item.id === residentId);
+                          return (
+                            <div className="room-occupant" key={residentId}>
+                              <span>{resident ? `${resident.firstName} ${resident.lastName}` : `Residente ${residentId.slice(-6)}`}</span>
+                              {hasPermission(user, "room.write") && hasPermission(user, "resident.read") && (
+                                <button
+                                  type="button"
+                                  disabled={roomsSaving}
+                                  onClick={() => void updateRoomAssignment(room.id, residentId, "release")}
+                                >
+                                  Liberar
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {hasPermission(user, "room.write") && hasPermission(user, "resident.read") && room.status === "available" && (
+                          <div className="room-assign-controls">
+                            <label className="visually-hidden" htmlFor={`room-resident-${room.id}`}>Residente para {room.code}</label>
+                            <select
+                              id={`room-resident-${room.id}`}
+                              value={roomResidentSelection[room.id] ?? ""}
+                              onChange={(event) => setRoomResidentSelection((current) => ({ ...current, [room.id]: event.target.value }))}
+                              disabled={roomsSaving || room.occupancy >= room.capacity}
+                            >
+                              <option value="">Seleccionar residente activo</option>
+                              {assignableResidents.map((resident) => (
+                                <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={roomsSaving || room.occupancy >= room.capacity || !roomResidentSelection[room.id]}
+                              onClick={() => void updateRoomAssignment(room.id, roomResidentSelection[room.id], "assign")}
+                            >
+                              Asignar
+                            </button>
+                          </div>
+                        )}
+                        <button
+                          className="room-history-toggle"
+                          type="button"
+                          onClick={() => visibleRoomHistory === room.id ? setVisibleRoomHistory("") : void loadRoomHistory(room.id)}
+                        >
+                          {visibleRoomHistory === room.id ? "Ocultar historial" : "Ver historial"}
+                        </button>
+                        {visibleRoomHistory === room.id && (
+                          <ol className="room-history-list">
+                            {(roomHistory[room.id] ?? []).length === 0 ? (
+                              <li>Sin movimientos registrados.</li>
+                            ) : (roomHistory[room.id] ?? []).map((entry, index) => {
+                              const resident = residents.find((item) => item.id === entry.residentId);
+                              const residentName = resident ? `${resident.firstName} ${resident.lastName}` : `Residente ${entry.residentId.slice(-6)}`;
+                              const changedAt = new Intl.DateTimeFormat("es-CL", { dateStyle: "short", timeStyle: "short" }).format(new Date(entry.changedAt));
+                              return <li key={`${entry.changedAt}-${index}`}>{changedAt}: {entry.action === "assigned" ? "Asignado" : "Liberado"} {residentName} · {entry.actor}</li>;
+                            })}
+                          </ol>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </section>
         ) : currentView === "residents" && hasPermission(user, "resident.read") ? (
@@ -837,14 +1145,47 @@ export default function App() {
                   <legend>Datos personales</legend>
                   <div className="profile-fields">
                     <label htmlFor="dateOfBirth">Fecha de nacimiento</label>
-                    <input
-                      id="dateOfBirth"
-                      type="date"
-                      value={profile.dateOfBirth}
-                      onChange={(event) =>
-                        updateProfile("dateOfBirth", event.target.value)
-                      }
-                    />
+                    <div className="date-input-wrap">
+                      <input
+                        id="dateOfBirth"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="bday"
+                        placeholder="dd/mm/aaaa"
+                        maxLength={10}
+                        aria-describedby="date-of-birth-format"
+                        value={profile.dateOfBirth}
+                        onChange={(event) =>
+                          updateProfile("dateOfBirth", formatDateInput(event.target.value))
+                        }
+                      />
+                      <button
+                        className="date-picker-button"
+                        type="button"
+                        onClick={() => datePickerRef.current?.showPicker()}
+                        aria-label="Abrir calendario"
+                        title="Abrir calendario"
+                      >
+                        <span className="calendar-icon" aria-hidden="true" />
+                      </button>
+                      <input
+                        ref={datePickerRef}
+                        className="native-date-picker"
+                        type="date"
+                        aria-label="Seleccionar fecha de nacimiento en el calendario"
+                        lang="es-CL"
+                        max={localDateToISO(new Date())}
+                        value={parseSpanishDate(profile.dateOfBirth) ?? ""}
+                        onChange={(event) =>
+                          updateProfile(
+                            "dateOfBirth",
+                            formatDateForDisplay(event.target.value)
+                          )
+                        }
+                        tabIndex={-1}
+                      />
+                      <span id="date-of-birth-format" className="date-format-hint">Escribe o elige día/mes/año</span>
+                    </div>
 
                     <label htmlFor="profilePhone">Teléfono</label>
                     <input

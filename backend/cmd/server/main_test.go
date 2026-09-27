@@ -29,6 +29,58 @@ func TestValidResidentStatus(t *testing.T) {
 	}
 }
 
+func TestValidateRoomCreate(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       RoomCreate
+		wantCode    string
+		wantStatus  string
+		wantError   bool
+	}{
+		{
+			name:       "normalizes code and defaults availability",
+			input:      RoomCreate{Code: "  a-101 ", Capacity: 2},
+			wantCode:   "A-101",
+			wantStatus: "available",
+		},
+		{
+			name:      "rejects empty code",
+			input:     RoomCreate{Capacity: 1},
+			wantError: true,
+		},
+		{
+			name:      "rejects code with spaces",
+			input:     RoomCreate{Code: "A 101", Capacity: 1},
+			wantError: true,
+		},
+		{
+			name:      "rejects capacity below one",
+			input:     RoomCreate{Code: "A-101", Capacity: 0},
+			wantError: true,
+		},
+		{
+			name:      "rejects unknown status",
+			input:     RoomCreate{Code: "A-101", Capacity: 1, Status: "occupied"},
+			wantError: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			room, message := validateRoomCreate(test.input)
+			if (message != "") != test.wantError {
+				t.Fatalf("validateRoomCreate() error = %q, want error %t", message, test.wantError)
+			}
+			if test.wantError {
+				return
+			}
+			if room.Code != test.wantCode || room.Status != test.wantStatus {
+				t.Errorf("room = {code: %q, status: %q}, want {code: %q, status: %q}", room.Code, room.Status, test.wantCode, test.wantStatus)
+			}
+		})
+	}
+}
+
 func TestDecodeStrictJSON(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -129,6 +181,61 @@ func TestPermissionsForRole(t *testing.T) {
 	}
 	if len(permissionsForRole("invalid-role")) != 0 {
 		t.Fatal("permissionsForRole() accepted an unknown role")
+	}
+}
+
+func TestRequirePermission(t *testing.T) {
+	t.Setenv("JWT_SECRET", "rbac-test-secret")
+
+	allowedToken, err := issueJWT("nurse", "nurse", []string{"resident.read"}, "rbac-test-secret", time.Hour)
+	if err != nil {
+		t.Fatalf("issueJWT() for permitted user returned error: %v", err)
+	}
+	forbiddenToken, err := issueJWT("nurse", "nurse", []string{"medical.read"}, "rbac-test-secret", time.Hour)
+	if err != nil {
+		t.Fatalf("issueJWT() for restricted user returned error: %v", err)
+	}
+	adminToken, err := issueJWT("admin", "admin", nil, "rbac-test-secret", time.Hour)
+	if err != nil {
+		t.Fatalf("issueJWT() for administrator returned error: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		token          string
+		wantStatus     int
+		wantNextCalled bool
+	}{
+		{name: "missing token", wantStatus: http.StatusUnauthorized},
+		{name: "invalid token", token: "not-a-jwt", wantStatus: http.StatusUnauthorized},
+		{name: "missing permission", token: forbiddenToken, wantStatus: http.StatusForbidden},
+		{name: "has permission", token: allowedToken, wantStatus: http.StatusOK, wantNextCalled: true},
+		{name: "administrator bypass", token: adminToken, wantStatus: http.StatusOK, wantNextCalled: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			nextCalled := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				nextCalled = true
+				w.WriteHeader(http.StatusOK)
+			})
+			handler := requirePermission("resident.read")(next)
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/residents/", nil)
+			if test.token != "" {
+				request.Header.Set("Authorization", "Bearer "+test.token)
+			}
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if nextCalled != test.wantNextCalled {
+				t.Errorf("next called = %t, want %t", nextCalled, test.wantNextCalled)
+			}
+		})
 	}
 }
 
