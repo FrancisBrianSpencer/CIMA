@@ -121,7 +121,7 @@ func TestAPIIntegration(t *testing.T) {
 		t.Fatalf("consulta anónima de residentes = %d, se esperaba 401", status)
 	}
 
-	status, body := integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/residents/", adminToken, map[string]string{
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/residents/", adminToken, map[string]string{
 		"firstName": "Residente",
 		"lastName":  "Integración",
 	})

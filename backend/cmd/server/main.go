@@ -88,6 +88,81 @@ type RoomPatch struct {
 	Status   *string `json:"status"`
 }
 
+// Stay representa la estadía de un residente en una habitación durante un periodo concreto.
+type Stay struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	RoomID    primitive.ObjectID `json:"roomId" bson:"roomId"`
+	Status    string             `json:"status" bson:"status"`
+	CheckIn   *time.Time         `json:"checkIn,omitempty" bson:"checkIn,omitempty"`
+	CheckOut  *time.Time         `json:"checkOut,omitempty" bson:"checkOut,omitempty"`
+	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedAt *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// StayCreate define el payload mínimo para crear una estadía vinculada a un residente y una habitación.
+type StayCreate struct {
+	ResidentID string `json:"residentId"`
+	RoomID    string `json:"roomId"`
+	Status    string `json:"status"`
+	CheckIn   string `json:"checkIn"`
+	CheckOut  string `json:"checkOut"`
+	Notes     string `json:"notes"`
+}
+
+// StayPatch permite ajustar parcialmente la estadía y el periodo vinculado.
+type StayPatch struct {
+	Status   *string `json:"status"`
+	CheckIn  *string `json:"checkIn"`
+	CheckOut *string `json:"checkOut"`
+	Notes    *string `json:"notes"`
+}
+
+// ClinicalNote registra la evolución clínica de un residente para la atención diaria.
+type ClinicalNote struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	Summary   string             `json:"summary" bson:"summary"`
+	Severity  string             `json:"severity" bson:"severity"`
+	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// ClinicalNoteCreate define el payload mínimo para crear una nota clínica.
+type ClinicalNoteCreate struct {
+	ResidentID string `json:"residentId"`
+	Summary    string `json:"summary"`
+	Severity   string `json:"severity"`
+	Notes      string `json:"notes"`
+}
+
+// MedicationEvent representa la administración o registro de un medicamento para un residente.
+type MedicationEvent struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	Medication string             `json:"medication" bson:"medication"`
+	Dose       string             `json:"dose" bson:"dose"`
+	Schedule   string             `json:"schedule,omitempty" bson:"schedule,omitempty"`
+	Status     string             `json:"status" bson:"status"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy  string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// MedicationEventCreate define el payload mínimo para registrar una administración o evento de medicación.
+type MedicationEventCreate struct {
+	ResidentID string `json:"residentId"`
+	Medication string `json:"medication"`
+	Dose       string `json:"dose"`
+	Schedule   string `json:"schedule"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+}
+
 type ResidentContact struct {
 	Name         string `json:"name,omitempty" bson:"name,omitempty"`
 	Relationship string `json:"relationship,omitempty" bson:"relationship,omitempty"`
@@ -169,6 +244,8 @@ var rolePermissions = map[string][]string{
 		"user.write",
 		"room.read",
 		"room.write",
+		"stay.read",
+		"stay.write",
 		"medical.read",
 		"medical.write",
 		"medication.read",
@@ -188,6 +265,8 @@ var rolePermissions = map[string][]string{
 		"user.read",
 		"room.read",
 		"room.write",
+		"stay.read",
+		"stay.write",
 		"medical.read",
 		"billing.read",
 		"audit.read",
@@ -212,6 +291,8 @@ var rolePermissions = map[string][]string{
 		"resident.update",
 		"room.read",
 		"room.write",
+		"stay.read",
+		"stay.write",
 	},
 	"accounting": {
 		"resident.read",
@@ -275,6 +356,39 @@ func main() {
 		Options: options.Index().SetUnique(true).SetSparse(true),
 	}); err != nil {
 		log.Fatalf("create unique room occupant index: %v", err)
+	}
+	stayCollection := client.Database(dbName).Collection("stays")
+	if _, err := stayCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create stay resident index: %v", err)
+	}
+	if _, err := stayCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "roomId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create stay room index: %v", err)
+	}
+	if _, err := stayCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create stay status index: %v", err)
+	}
+	clinicalNoteCollection := client.Database(dbName).Collection("clinical_notes")
+	if _, err := clinicalNoteCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create clinical note resident index: %v", err)
+	}
+	medicationEventCollection := client.Database(dbName).Collection("medication_events")
+	if _, err := medicationEventCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create medication event resident index: %v", err)
+	}
+	if _, err := medicationEventCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create medication event status index: %v", err)
 	}
 	// userCollection guarda usuarios, roles y permisos para la autenticación del sistema.
 	userCollection := client.Database(dbName).Collection("users")
@@ -931,21 +1045,368 @@ func main() {
 		})
 	})
 
+	r.Route("/api/v1/stays", func(r chi.Router) {
+		r.With(requirePermission("stay.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := stayCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar las estadías."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			stays := make([]Stay, 0)
+			if err := cursor.All(ctx, &stays); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar las estadías."})
+				return
+			}
+			writeJSON(w, http.StatusOK, stays)
+		})
+
+		r.With(requirePermission("stay.read")).Get("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			stayID, err := primitive.ObjectIDFromHex(chi.URLParam(req, "id"))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador de la estadía no es válido."})
+				return
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var stay Stay
+			if err := stayCollection.FindOne(ctx, bson.M{"_id": stayID}).Decode(&stay); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la estadía."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar la estadía."})
+				return
+			}
+			writeJSON(w, http.StatusOK, stay)
+		})
+
+		r.With(requirePermission("stay.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
+			var input StayCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+			stay, validationError := validateStayCreate(input)
+			if validationError != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+			roomID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.RoomID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador de la habitación no es válido."})
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+			if resident.Status != "active" {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "Solo se pueden crear estadías para residentes activos."})
+				return
+			}
+
+			var room Room
+			if err := roomCollection.FindOne(ctx, bson.M{"_id": roomID}).Decode(&room); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la habitación."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar la habitación."})
+				return
+			}
+			if room.Status == "maintenance" || room.Status == "closed" {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "La habitación no está disponible para una nueva estadía."})
+				return
+			}
+
+			if stay.Status == "active" {
+				var active Stay
+				if err := stayCollection.FindOne(ctx, bson.M{"residentId": residentID, "status": "active"}).Decode(&active); err == nil {
+					writeJSON(w, http.StatusConflict, map[string]string{"error": "El residente ya tiene una estadía activa."})
+					return
+				} else if err != mongo.ErrNoDocuments {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo verificar la estadía activa."})
+					return
+				}
+			}
+
+			now := time.Now().UTC()
+			stay.ResidentID = residentID
+			stay.RoomID = roomID
+			stay.CreatedAt = &now
+			stay.UpdatedAt = &now
+
+			result, err := stayCollection.InsertOne(ctx, stay)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo crear la estadía."})
+				return
+			}
+			stay.ID = result.InsertedID.(primitive.ObjectID)
+			if stay.Status == "active" {
+				_, err = roomCollection.UpdateOne(ctx, bson.M{"_id": roomID}, bson.M{
+					"$addToSet": bson.M{"occupantIds": residentID},
+					"$set":      bson.M{"updatedAt": now},
+				})
+				if err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo asociar al residente a la habitación."})
+					return
+				}
+			}
+			writeJSON(w, http.StatusCreated, stay)
+		})
+
+		r.With(requirePermission("stay.write")).Patch("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			stayID, err := primitive.ObjectIDFromHex(chi.URLParam(req, "id"))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador de la estadía no es válido."})
+				return
+			}
+			var patch StayPatch
+			if !decodeStrictJSON(w, req, &patch) {
+				return
+			}
+
+			updates := bson.M{}
+			if patch.Status != nil {
+				status := normalizeStayStatus(*patch.Status)
+				if !validStayStatus(status) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El estado debe ser planned, active o completed."})
+					return
+				}
+				updates["status"] = status
+			}
+			if patch.CheckIn != nil {
+				value, parseErr := parseStayDate("checkIn", *patch.CheckIn)
+				if parseErr != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+					return
+				}
+				updates["checkIn"] = value
+			}
+			if patch.CheckOut != nil {
+				value, parseErr := parseStayDate("checkOut", *patch.CheckOut)
+				if parseErr != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+					return
+				}
+				updates["checkOut"] = value
+			}
+			if patch.Notes != nil {
+				updates["notes"] = strings.TrimSpace(*patch.Notes)
+			}
+			if len(updates) == 0 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Debes indicar al menos un dato de la estadía."})
+				return
+			}
+			updates["updatedAt"] = time.Now().UTC()
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var current Stay
+			if err := stayCollection.FindOne(ctx, bson.M{"_id": stayID}).Decode(&current); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la estadía."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar la estadía."})
+				return
+			}
+
+			if patch.CheckIn != nil || patch.CheckOut != nil {
+				candidateCheckIn := current.CheckIn
+				candidateCheckOut := current.CheckOut
+				if patch.CheckIn != nil {
+					parsed, parseErr := parseStayDate("checkIn", *patch.CheckIn)
+					if parseErr != nil {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+						return
+					}
+					candidateCheckIn = parsed
+				}
+				if patch.CheckOut != nil {
+					parsed, parseErr := parseStayDate("checkOut", *patch.CheckOut)
+					if parseErr != nil {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+						return
+					}
+					candidateCheckOut = parsed
+				}
+				if candidateCheckIn != nil && candidateCheckOut != nil && candidateCheckOut.Before(*candidateCheckIn) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "La fecha de salida no puede ser anterior a la de ingreso."})
+					return
+				}
+			}
+
+			if updates["status"] != nil && updates["status"] == "completed" {
+				if current.CheckOut == nil {
+					now := time.Now().UTC()
+					updates["checkOut"] = &now
+				}
+				_, _ = roomCollection.UpdateOne(ctx, bson.M{"_id": current.RoomID}, bson.M{"$pull": bson.M{"occupantIds": current.ResidentID}})
+			}
+			if updates["status"] != nil && updates["status"] == "active" {
+				_, _ = roomCollection.UpdateOne(ctx, bson.M{"_id": current.RoomID}, bson.M{"$addToSet": bson.M{"occupantIds": current.ResidentID}})
+			}
+
+			var stay Stay
+			err = stayCollection.FindOneAndUpdate(
+				ctx,
+				bson.M{"_id": stayID},
+				bson.M{"$set": updates},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			).Decode(&stay)
+			if err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la estadía."})
+				return
+			}
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo actualizar la estadía."})
+				return
+			}
+			writeJSON(w, http.StatusOK, stay)
+		})
+	})
+
 	r.Route("/api/v1/medical", func(r chi.Router) {
 		r.With(requirePermission("medical.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de atención clínica disponible"})
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := clinicalNoteCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar las notas clínicas."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			notes := make([]ClinicalNote, 0)
+			if err := cursor.All(ctx, &notes); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar las notas clínicas."})
+				return
+			}
+			writeJSON(w, http.StatusOK, notes)
 		})
 		r.With(requirePermission("medical.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de atención clínica aún no está implementado."})
+			var input ClinicalNoteCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+			note, validationError := validateClinicalNoteCreate(input)
+			if validationError != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+
+			now := time.Now().UTC()
+			note.ResidentID = residentID
+			note.CreatedBy = requestUsername(req)
+			note.CreatedAt = &now
+			note.UpdatedAt = &now
+
+			result, err := clinicalNoteCollection.InsertOne(ctx, note)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo guardar la nota clínica."})
+				return
+			}
+			note.ID = result.InsertedID.(primitive.ObjectID)
+			writeJSON(w, http.StatusCreated, note)
 		})
 	})
 
 	r.Route("/api/v1/medication-events", func(r chi.Router) {
 		r.With(requirePermission("medication.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de medicamentos disponible"})
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := medicationEventCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar los eventos de medicamentos."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			events := make([]MedicationEvent, 0)
+			if err := cursor.All(ctx, &events); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar los eventos de medicamentos."})
+				return
+			}
+			writeJSON(w, http.StatusOK, events)
 		})
 		r.With(requirePermission("medication.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de medicamentos aún no está implementado."})
+			var input MedicationEventCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+			event, validationError := validateMedicationEventCreate(input)
+			if validationError != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+
+			now := time.Now().UTC()
+			event.ResidentID = residentID
+			event.CreatedBy = requestUsername(req)
+			event.CreatedAt = &now
+			event.UpdatedAt = &now
+
+			result, err := medicationEventCollection.InsertOne(ctx, event)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo registrar el evento de medicación."})
+				return
+			}
+			event.ID = result.InsertedID.(primitive.ObjectID)
+			writeJSON(w, http.StatusCreated, event)
 		})
 	})
 
@@ -1291,6 +1752,133 @@ func normalizeRoomCode(code string) string {
 // validRoomStatus limita los estados a los definidos para el catálogo de habitaciones.
 func validRoomStatus(status string) bool {
 	return status == "available" || status == "maintenance" || status == "closed"
+}
+
+// validStayStatus comprueba los estados operativos permitidos para una estadía.
+func validStayStatus(status string) bool {
+	return status == "planned" || status == "active" || status == "completed"
+}
+
+// normalizeStayStatus normaliza el nombre del estado para evitar diferencias de mayúsculas o espacios.
+func normalizeStayStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+// parseStayDate interpreta una fecha de estadía usando el formato AAAA-MM-DD.
+func parseStayDate(field, raw string) (*time.Time, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return nil, fmt.Errorf("La fecha de %s debe usar el formato AAAA-MM-DD.", field)
+	}
+	return &parsed, nil
+}
+
+// validateStayCreate normaliza y comprueba los datos de una nueva estadía.
+func validateStayCreate(input StayCreate) (Stay, string) {
+	stay := Stay{
+		Status: normalizeStayStatus(input.Status),
+		Notes:  strings.TrimSpace(input.Notes),
+	}
+	if stay.Status == "" {
+		stay.Status = "planned"
+	} else if !validStayStatus(stay.Status) {
+		return Stay{}, "El estado debe ser planned, active o completed."
+	}
+
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return Stay{}, "El identificador del residente es obligatorio."
+	}
+	if strings.TrimSpace(input.RoomID) == "" {
+		return Stay{}, "El identificador de la habitación es obligatorio."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return Stay{}, "El identificador del residente no es válido."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.RoomID)); err != nil {
+		return Stay{}, "El identificador de la habitación no es válido."
+	}
+
+	checkIn, err := parseStayDate("checkIn", input.CheckIn)
+	if err != nil {
+		return Stay{}, err.Error()
+	}
+	checkOut, err := parseStayDate("checkOut", input.CheckOut)
+	if err != nil {
+		return Stay{}, err.Error()
+	}
+	stay.CheckIn = checkIn
+	stay.CheckOut = checkOut
+	if stay.CheckIn != nil && stay.CheckOut != nil && stay.CheckOut.Before(*stay.CheckIn) {
+		return Stay{}, "La fecha de salida no puede ser anterior a la de ingreso."
+	}
+	return stay, ""
+}
+
+// validClinicalSeverity comprueba los niveles de severidad de una nota clínica.
+func validClinicalSeverity(severity string) bool {
+	return severity == "low" || severity == "normal" || severity == "high"
+}
+
+// validateClinicalNoteCreate valida el contenido mínimo de una nota clínica.
+func validateClinicalNoteCreate(input ClinicalNoteCreate) (ClinicalNote, string) {
+	note := ClinicalNote{
+		Summary:  strings.TrimSpace(input.Summary),
+		Severity: strings.ToLower(strings.TrimSpace(input.Severity)),
+		Notes:    strings.TrimSpace(input.Notes),
+	}
+	if note.Summary == "" {
+		return ClinicalNote{}, "El resumen de la nota clínica es obligatorio."
+	}
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return ClinicalNote{}, "El identificador del residente es obligatorio."
+	}
+	if note.Severity == "" {
+		note.Severity = "normal"
+	} else if !validClinicalSeverity(note.Severity) {
+		return ClinicalNote{}, "La severidad debe ser low, normal o high."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return ClinicalNote{}, "El identificador del residente no es válido."
+	}
+	return note, ""
+}
+
+// validMedicationStatus comprueba los estados de administración de un medicamento.
+func validMedicationStatus(status string) bool {
+	return status == "scheduled" || status == "given" || status == "missed" || status == "rejected"
+}
+
+// validateMedicationEventCreate valida el payload mínimo para un evento de medicación.
+func validateMedicationEventCreate(input MedicationEventCreate) (MedicationEvent, string) {
+	event := MedicationEvent{
+		Medication: strings.TrimSpace(input.Medication),
+		Dose:       strings.TrimSpace(input.Dose),
+		Schedule:   strings.TrimSpace(input.Schedule),
+		Status:     strings.ToLower(strings.TrimSpace(input.Status)),
+		Notes:      strings.TrimSpace(input.Notes),
+	}
+	if event.Medication == "" {
+		return MedicationEvent{}, "El nombre del medicamento es obligatorio."
+	}
+	if event.Dose == "" {
+		return MedicationEvent{}, "La dosis es obligatoria."
+	}
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return MedicationEvent{}, "El identificador del residente es obligatorio."
+	}
+	if event.Status == "" {
+		event.Status = "scheduled"
+	} else if !validMedicationStatus(event.Status) {
+		return MedicationEvent{}, "El estado debe ser scheduled, given, missed o rejected."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return MedicationEvent{}, "El identificador del residente no es válido."
+	}
+	return event, ""
 }
 
 // validateRoomCreate normaliza y comprueba los datos de una habitación nueva.

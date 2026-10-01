@@ -43,6 +43,42 @@ type RoomAssignmentEvent = {
   changedAt: string;
 };
 
+type StayStatus = "planned" | "active" | "completed";
+
+type Stay = {
+  id: string;
+  residentId: string;
+  roomId: string;
+  status: StayStatus | string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type ClinicalNote = {
+  id: string;
+  residentId: string;
+  summary: string;
+  severity: "low" | "normal" | "high" | string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
+type MedicationEvent = {
+  id: string;
+  residentId: string;
+  medication: string;
+  dose: string;
+  schedule?: string;
+  status: "scheduled" | "given" | "missed" | "rejected" | string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
 type Contact = {
   name: string;
   relationship: string;
@@ -70,6 +106,8 @@ function permissionLabel(permission: string) {
     "resident.delete": "Archivar residentes",
     "room.read": "Consultar habitaciones",
     "room.write": "Gestionar habitaciones",
+    "stay.read": "Consultar estadías",
+    "stay.write": "Gestionar estadías",
     "medical.read": "Consultar atención clínica",
     "medical.write": "Registrar atención clínica",
     "medication.read": "Consultar medicamentos",
@@ -155,6 +193,37 @@ export default function App() {
   const [roomResidentSelection, setRoomResidentSelection] = useState<Record<string, string>>({});
   const [roomHistory, setRoomHistory] = useState<Record<string, RoomAssignmentEvent[]>>({});
   const [visibleRoomHistory, setVisibleRoomHistory] = useState("");
+  const [stays, setStays] = useState<Stay[]>([]);
+  const [staysLoading, setStaysLoading] = useState(false);
+  const [staysSaving, setStaysSaving] = useState(false);
+  const [stayError, setStayError] = useState("");
+  const [staySuccess, setStaySuccess] = useState("");
+  const [stayResidentId, setStayResidentId] = useState("");
+  const [stayRoomId, setStayRoomId] = useState("");
+  const [stayStatus, setStayStatus] = useState<StayStatus>("planned");
+  const [stayCheckIn, setStayCheckIn] = useState("");
+  const [stayCheckOut, setStayCheckOut] = useState("");
+  const [stayNotes, setStayNotes] = useState("");
+  const [clinicalNotes, setClinicalNotes] = useState<ClinicalNote[]>([]);
+  const [clinicalNotesLoading, setClinicalNotesLoading] = useState(false);
+  const [clinicalNotesSaving, setClinicalNotesSaving] = useState(false);
+  const [clinicalError, setClinicalError] = useState("");
+  const [clinicalSuccess, setClinicalSuccess] = useState("");
+  const [clinicalResidentId, setClinicalResidentId] = useState("");
+  const [clinicalSummary, setClinicalSummary] = useState("");
+  const [clinicalSeverity, setClinicalSeverity] = useState("normal");
+  const [clinicalNotesText, setClinicalNotesText] = useState("");
+  const [medicationEvents, setMedicationEvents] = useState<MedicationEvent[]>([]);
+  const [medicationLoading, setMedicationLoading] = useState(false);
+  const [medicationSaving, setMedicationSaving] = useState(false);
+  const [medicationError, setMedicationError] = useState("");
+  const [medicationSuccess, setMedicationSuccess] = useState("");
+  const [medicationResidentId, setMedicationResidentId] = useState("");
+  const [medicationName, setMedicationName] = useState("");
+  const [medicationDose, setMedicationDose] = useState("");
+  const [medicationSchedule, setMedicationSchedule] = useState("");
+  const [medicationStatus, setMedicationStatus] = useState("scheduled");
+  const [medicationNotes, setMedicationNotes] = useState("");
   const [selectedResident, setSelectedResident] = useState<Resident | null>(null);
   const [profile, setProfile] = useState<ResidentProfile>(emptyProfile);
   const datePickerRef = useRef<HTMLInputElement>(null);
@@ -344,6 +413,207 @@ export default function App() {
       setVisibleRoomHistory(roomId);
     } catch (err) {
       setRoomError(userFacingError(err, "No se pudo cargar el historial."));
+    }
+  }
+
+  // loadStays consulta las estadías activas y registradas del sistema.
+  const loadStays = useCallback(async () => {
+    if (!hasPermission(user, "stay.read")) return;
+    setStaysLoading(true);
+    setStayError("");
+    try {
+      const response = await apiFetch("/stays/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las estadías."));
+      }
+      const data = (await response.json()) as Stay[];
+      setStays(data.sort((left, right) => (left.checkIn ?? "").localeCompare(right.checkIn ?? "")));
+    } catch (err) {
+      setStayError(userFacingError(err, "No se pudieron cargar las estadías."));
+    } finally {
+      setStaysLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && activeView === "stays") void loadStays();
+  }, [user, activeView, loadStays]);
+
+  // handleStaySubmit registra una nueva estadía vinculada a un residente y una habitación.
+  async function handleStaySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stayResidentId || !stayRoomId) {
+      setStayError("Selecciona un residente y una habitación.");
+      return;
+    }
+    if (stayCheckIn && Number.isNaN(Date.parse(stayCheckIn))) {
+      setStayError("La fecha de ingreso debe usar formato AAAA-MM-DD.");
+      return;
+    }
+    if (stayCheckOut && Number.isNaN(Date.parse(stayCheckOut))) {
+      setStayError("La fecha de salida debe usar formato AAAA-MM-DD.");
+      return;
+    }
+    if (stayCheckIn && stayCheckOut && new Date(stayCheckOut) < new Date(stayCheckIn)) {
+      setStayError("La fecha de salida no puede ser anterior a la de ingreso.");
+      return;
+    }
+
+    setStayError("");
+    setStaySuccess("");
+    setStaysSaving(true);
+    try {
+      const response = await apiFetch("/stays/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: stayResidentId,
+          roomId: stayRoomId,
+          status: stayStatus,
+          checkIn: stayCheckIn,
+          checkOut: stayCheckOut,
+          notes: stayNotes.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la estadía."));
+      }
+      setStaySuccess("Estadía creada correctamente.");
+      setStayResidentId("");
+      setStayRoomId("");
+      setStayStatus("planned");
+      setStayCheckIn("");
+      setStayCheckOut("");
+      setStayNotes("");
+      await loadStays();
+    } catch (err) {
+      setStayError(userFacingError(err, "No se pudo guardar la estadía."));
+    } finally {
+      setStaysSaving(false);
+    }
+  }
+
+  const loadClinicalNotes = useCallback(async () => {
+    if (!hasPermission(user, "medical.read")) return;
+    setClinicalNotesLoading(true);
+    setClinicalError("");
+    try {
+      const response = await apiFetch("/medical/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las notas clínicas."));
+      }
+      const data = (await response.json()) as ClinicalNote[];
+      setClinicalNotes(data.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")));
+    } catch (err) {
+      setClinicalError(userFacingError(err, "No se pudieron cargar las notas clínicas."));
+    } finally {
+      setClinicalNotesLoading(false);
+    }
+  }, [user]);
+
+  const loadMedicationEvents = useCallback(async () => {
+    if (!hasPermission(user, "medication.read")) return;
+    setMedicationLoading(true);
+    setMedicationError("");
+    try {
+      const response = await apiFetch("/medication-events/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar los medicamentos."));
+      }
+      const data = (await response.json()) as MedicationEvent[];
+      setMedicationEvents(data.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")));
+    } catch (err) {
+      setMedicationError(userFacingError(err, "No se pudieron cargar los medicamentos."));
+    } finally {
+      setMedicationLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && activeView === "clinical") {
+      void loadClinicalNotes();
+      void loadMedicationEvents();
+    }
+  }, [user, activeView, loadClinicalNotes, loadMedicationEvents]);
+
+  async function handleClinicalSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!clinicalResidentId) {
+      setClinicalError("Selecciona un residente.");
+      return;
+    }
+    if (!clinicalSummary.trim()) {
+      setClinicalError("El resumen es obligatorio.");
+      return;
+    }
+    setClinicalError("");
+    setClinicalSuccess("");
+    setClinicalNotesSaving(true);
+    try {
+      const response = await apiFetch("/medical/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: clinicalResidentId,
+          summary: clinicalSummary.trim(),
+          severity: clinicalSeverity,
+          notes: clinicalNotesText.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la nota clínica."));
+      }
+      setClinicalSuccess("Nota clínica guardada.");
+      setClinicalResidentId("");
+      setClinicalSummary("");
+      setClinicalSeverity("normal");
+      setClinicalNotesText("");
+      await loadClinicalNotes();
+    } catch (err) {
+      setClinicalError(userFacingError(err, "No se pudo guardar la nota clínica."));
+    } finally {
+      setClinicalNotesSaving(false);
+    }
+  }
+
+  async function handleMedicationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!medicationResidentId) {
+      setMedicationError("Selecciona un residente.");
+      return;
+    }
+    if (!medicationName.trim() || !medicationDose.trim()) {
+      setMedicationError("El medicamento y la dosis son obligatorios.");
+      return;
+    }
+    setMedicationError("");
+    setMedicationSuccess("");
+    setMedicationSaving(true);
+    try {
+      const response = await apiFetch("/medication-events/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: medicationResidentId,
+          medication: medicationName.trim(),
+          dose: medicationDose.trim(),
+          schedule: medicationSchedule.trim(),
+          status: medicationStatus,
+          notes: medicationNotes.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo registrar el medicamento."));
+      }
+      setMedicationSuccess("Evento de medicación registrado.");
+      setMedicationResidentId("");
+      setMedicationName("");
+      setMedicationDose("");
+      setMedicationSchedule("");
+      setMedicationStatus("scheduled");
+      setMedicationNotes("");
+      await loadMedicationEvents();
+    } catch (err) {
+      setMedicationError(userFacingError(err, "No se pudo registrar el medicamento."));
+    } finally {
+      setMedicationSaving(false);
     }
   }
 
@@ -662,6 +932,7 @@ export default function App() {
     { id: "dashboard", label: "Resumen", permissions: ["dashboard.read"] },
     { id: "residents", label: "Residentes", permissions: ["resident.read"] },
     { id: "rooms", label: "Habitaciones", permissions: ["room.read"] },
+    { id: "stays", label: "Estadías", permissions: ["stay.read"] },
     { id: "clinical", label: "Atención clínica", permissions: ["medical.read", "medication.read"] },
     { id: "billing", label: "Facturación", permissions: ["billing.read"] },
     { id: "documents", label: "Documentos", permissions: ["document.read"] },
@@ -683,6 +954,11 @@ export default function App() {
     available: "Disponible",
     maintenance: "En mantención",
     closed: "Cerrada",
+  };
+  const stayStatusLabels: Record<StayStatus, string> = {
+    planned: "Planificada",
+    active: "Activa",
+    completed: "Finalizada",
   };
   const assignedResidentIds = new Set(rooms.flatMap((room) => room.occupantIds ?? []));
   const assignableResidents = residents.filter(
@@ -942,6 +1218,224 @@ export default function App() {
                       </div>
                     </li>
                   ))}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "stays" && hasPermission(user, "stay.read") ? (
+          <section className="resident-content" aria-label="Gestión de estadías">
+            {hasPermission(user, "stay.write") && (
+              <section className="card" aria-labelledby="stay-form-title">
+                <h2 id="stay-form-title">Nueva estadía</h2>
+                <form onSubmit={handleStaySubmit}>
+                  <label htmlFor="stay-resident">Residente</label>
+                  <select id="stay-resident" value={stayResidentId} onChange={(event) => setStayResidentId(event.target.value)} required disabled={staysSaving}>
+                    <option value="">Seleccionar residente activo</option>
+                    {residents.filter((resident) => resident.status === "active").map((resident) => (
+                      <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                    ))}
+                  </select>
+
+                  <label htmlFor="stay-room">Habitación</label>
+                  <select id="stay-room" value={stayRoomId} onChange={(event) => setStayRoomId(event.target.value)} required disabled={staysSaving}>
+                    <option value="">Seleccionar habitación</option>
+                    {rooms.map((room) => (
+                      <option key={room.id} value={room.id}>{room.code} ({room.occupancy}/{room.capacity})</option>
+                    ))}
+                  </select>
+
+                  <label htmlFor="stay-status">Estado</label>
+                  <select id="stay-status" value={stayStatus} onChange={(event) => setStayStatus(event.target.value as StayStatus)} disabled={staysSaving}>
+                    <option value="planned">Planificada</option>
+                    <option value="active">Activa</option>
+                    <option value="completed">Finalizada</option>
+                  </select>
+
+                  <label htmlFor="stay-checkin">Fecha de ingreso</label>
+                  <input id="stay-checkin" type="date" value={stayCheckIn} onChange={(event) => setStayCheckIn(event.target.value)} disabled={staysSaving} />
+
+                  <label htmlFor="stay-checkout">Fecha de salida</label>
+                  <input id="stay-checkout" type="date" value={stayCheckOut} onChange={(event) => setStayCheckOut(event.target.value)} disabled={staysSaving} />
+
+                  <label htmlFor="stay-notes">Notas</label>
+                  <textarea id="stay-notes" value={stayNotes} onChange={(event) => setStayNotes(event.target.value)} rows={3} disabled={staysSaving} />
+
+                  {stayError && <p className="error" role="alert">{stayError}</p>}
+                  {staySuccess && <p className="success" role="status">{staySuccess}</p>}
+                  <button type="submit" disabled={staysSaving}>{staysSaving ? "Guardando..." : "Guardar estadía"}</button>
+                </form>
+              </section>
+            )}
+
+            <section className="card" aria-labelledby="stays-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ALOJAMIENTO</p><h2 id="stays-list-title">Estadías</h2></div>
+                <button type="button" onClick={() => void loadStays()} disabled={staysLoading}>{staysLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {stayError && !hasPermission(user, "stay.write") && <p className="error" role="alert">{stayError}</p>}
+              {staysLoading ? (
+                <p role="status">Cargando estadías...</p>
+              ) : stays.length === 0 ? (
+                <p>No hay estadías registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {stays.map((stay) => {
+                    const resident = residents.find((item) => item.id === stay.residentId);
+                    const room = rooms.find((item) => item.id === stay.roomId);
+                    const residentName = resident ? `${resident.firstName} ${resident.lastName}` : "Residente";
+                    const roomCode = room ? room.code : "Habitación";
+                    return (
+                      <li key={stay.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{residentName}</strong>
+                              <span>{roomCode}</span>
+                            </div>
+                            <span className={`status room-status-${stay.status}`}>
+                              {stayStatusLabels[stay.status as StayStatus] ?? String(stay.status)}
+                            </span>
+                          </div>
+                          <div className="room-occupant">
+                            <span>Ingreso: {stay.checkIn ? new Date(stay.checkIn).toLocaleDateString("es-CL") : "—"}</span>
+                            <span>Salida: {stay.checkOut ? new Date(stay.checkOut).toLocaleDateString("es-CL") : "—"}</span>
+                          </div>
+                          {stay.notes && <p>{stay.notes}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "clinical" && (hasPermission(user, "medical.read") || hasPermission(user, "medication.read")) ? (
+          <section className="resident-content" aria-label="Atención clínica">
+            {(hasPermission(user, "medical.write") || hasPermission(user, "medication.write")) && (
+              <>
+                <section className="card" aria-labelledby="clinical-form-title">
+                  <h2 id="clinical-form-title">Nota clínica</h2>
+                  <form onSubmit={handleClinicalSubmit}>
+                    <label htmlFor="clinical-resident">Residente</label>
+                    <select id="clinical-resident" value={clinicalResidentId} onChange={(event) => setClinicalResidentId(event.target.value)} required disabled={clinicalNotesSaving}>
+                      <option value="">Seleccionar residente</option>
+                      {residents.filter((resident) => resident.status === "active").map((resident) => (
+                        <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                      ))}
+                    </select>
+                    <label htmlFor="clinical-summary">Resumen</label>
+                    <input id="clinical-summary" value={clinicalSummary} onChange={(event) => setClinicalSummary(event.target.value)} required disabled={clinicalNotesSaving} />
+                    <label htmlFor="clinical-severity">Severidad</label>
+                    <select id="clinical-severity" value={clinicalSeverity} onChange={(event) => setClinicalSeverity(event.target.value)} disabled={clinicalNotesSaving}>
+                      <option value="low">Baja</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">Alta</option>
+                    </select>
+                    <label htmlFor="clinical-note-text">Observaciones</label>
+                    <textarea id="clinical-note-text" value={clinicalNotesText} onChange={(event) => setClinicalNotesText(event.target.value)} rows={4} disabled={clinicalNotesSaving} />
+                    {clinicalError && <p className="error" role="alert">{clinicalError}</p>}
+                    {clinicalSuccess && <p className="success" role="status">{clinicalSuccess}</p>}
+                    <button type="submit" disabled={clinicalNotesSaving}>{clinicalNotesSaving ? "Guardando..." : "Guardar nota"}</button>
+                  </form>
+                </section>
+
+                <section className="card" aria-labelledby="medication-form-title">
+                  <h2 id="medication-form-title">Medicación</h2>
+                  <form onSubmit={handleMedicationSubmit}>
+                    <label htmlFor="medication-resident">Residente</label>
+                    <select id="medication-resident" value={medicationResidentId} onChange={(event) => setMedicationResidentId(event.target.value)} required disabled={medicationSaving}>
+                      <option value="">Seleccionar residente</option>
+                      {residents.filter((resident) => resident.status === "active").map((resident) => (
+                        <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                      ))}
+                    </select>
+                    <label htmlFor="medication-name">Medicamento</label>
+                    <input id="medication-name" value={medicationName} onChange={(event) => setMedicationName(event.target.value)} required disabled={medicationSaving} />
+                    <label htmlFor="medication-dose">Dosis</label>
+                    <input id="medication-dose" value={medicationDose} onChange={(event) => setMedicationDose(event.target.value)} required disabled={medicationSaving} />
+                    <label htmlFor="medication-schedule">Horario</label>
+                    <input id="medication-schedule" value={medicationSchedule} onChange={(event) => setMedicationSchedule(event.target.value)} disabled={medicationSaving} />
+                    <label htmlFor="medication-status">Estado</label>
+                    <select id="medication-status" value={medicationStatus} onChange={(event) => setMedicationStatus(event.target.value)} disabled={medicationSaving}>
+                      <option value="scheduled">Programado</option>
+                      <option value="given">Administrado</option>
+                      <option value="missed">No administrado</option>
+                      <option value="rejected">Rechazado</option>
+                    </select>
+                    <label htmlFor="medication-notes">Notas</label>
+                    <textarea id="medication-notes" value={medicationNotes} onChange={(event) => setMedicationNotes(event.target.value)} rows={3} disabled={medicationSaving} />
+                    {medicationError && <p className="error" role="alert">{medicationError}</p>}
+                    {medicationSuccess && <p className="success" role="status">{medicationSuccess}</p>}
+                    <button type="submit" disabled={medicationSaving}>{medicationSaving ? "Guardando..." : "Registrar medicación"}</button>
+                  </form>
+                </section>
+              </>
+            )}
+
+            <section className="card" aria-labelledby="clinical-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">EVOLUCIÓN</p><h2 id="clinical-list-title">Notas clínicas</h2></div>
+                <button type="button" onClick={() => void loadClinicalNotes()} disabled={clinicalNotesLoading}>{clinicalNotesLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {clinicalNotesLoading ? (
+                <p role="status">Cargando notas...</p>
+              ) : clinicalNotes.length === 0 ? (
+                <p>No hay notas clínicas registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {clinicalNotes.map((note) => {
+                    const resident = residents.find((item) => item.id === note.residentId);
+                    return (
+                      <li key={note.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</strong>
+                              <span>{note.summary}</span>
+                            </div>
+                            <span className={`status room-status-${note.severity === "high" ? "closed" : note.severity === "low" ? "maintenance" : "available"}`}>
+                              {note.severity}
+                            </span>
+                          </div>
+                          {note.notes && <p>{note.notes}</p>}
+                          {note.createdBy && <small>Por {note.createdBy}</small>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            <section className="card" aria-labelledby="medication-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">MEDICACIÓN</p><h2 id="medication-list-title">Eventos de medicamentos</h2></div>
+                <button type="button" onClick={() => void loadMedicationEvents()} disabled={medicationLoading}>{medicationLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {medicationLoading ? (
+                <p role="status">Cargando medicación...</p>
+              ) : medicationEvents.length === 0 ? (
+                <p>No hay eventos de medicación registrados.</p>
+              ) : (
+                <ul className="resident-list">
+                  {medicationEvents.map((event) => {
+                    const resident = residents.find((item) => item.id === event.residentId);
+                    return (
+                      <li key={event.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</strong>
+                              <span>{event.medication} · {event.dose}</span>
+                            </div>
+                            <span className="status room-status-available">{event.status}</span>
+                          </div>
+                          {event.schedule && <p>Horario: {event.schedule}</p>}
+                          {event.notes && <p>{event.notes}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>

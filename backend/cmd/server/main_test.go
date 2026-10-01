@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestValidResidentStatus(t *testing.T) {
@@ -236,6 +238,85 @@ func TestRequirePermission(t *testing.T) {
 				t.Errorf("next called = %t, want %t", nextCalled, test.wantNextCalled)
 			}
 		})
+	}
+}
+
+func TestValidStayStatus(t *testing.T) {
+	tests := []struct {
+		status string
+		valid  bool
+	}{
+		{status: "planned", valid: true},
+		{status: "active", valid: true},
+		{status: "completed", valid: true},
+		{status: "cancelled", valid: false},
+		{status: "", valid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.status, func(t *testing.T) {
+			if got := validStayStatus(test.status); got != test.valid {
+				t.Errorf("validStayStatus(%q) = %t, want %t", test.status, got, test.valid)
+			}
+		})
+	}
+}
+
+func TestValidateStayCreate(t *testing.T) {
+	residentID := primitive.NewObjectID().Hex()
+	roomID := primitive.NewObjectID().Hex()
+	checkIn := "2026-09-01"
+	checkOut := "2026-09-15"
+
+	stay, message := validateStayCreate(StayCreate{ResidentID: residentID, RoomID: roomID, CheckIn: checkIn, CheckOut: checkOut})
+	if message != "" {
+		t.Fatalf("validateStayCreate() unexpected error: %q", message)
+	}
+	if stay.Status != "planned" {
+		t.Fatalf("stay.Status = %q, want planned", stay.Status)
+	}
+	if stay.CheckIn == nil || stay.CheckOut == nil {
+		t.Fatal("validateStayCreate() returned nil dates")
+	}
+	if stay.CheckIn.Format("2006-01-02") != checkIn || stay.CheckOut.Format("2006-01-02") != checkOut {
+		t.Fatalf("dates = %q/%q, want %q/%q", stay.CheckIn.Format("2006-01-02"), stay.CheckOut.Format("2006-01-02"), checkIn, checkOut)
+	}
+
+	_, message = validateStayCreate(StayCreate{ResidentID: residentID, RoomID: roomID, CheckIn: "2026-09-20", CheckOut: "2026-09-15"})
+	if message == "" {
+		t.Fatal("validateStayCreate() accepted a check-out before check-in")
+	}
+}
+
+func TestValidateClinicalNoteCreate(t *testing.T) {
+	residentID := primitive.NewObjectID().Hex()
+	note, message := validateClinicalNoteCreate(ClinicalNoteCreate{ResidentID: residentID, Summary: "Revisión", Notes: "Sin novedades."})
+	if message != "" {
+		t.Fatalf("validateClinicalNoteCreate() unexpected error: %q", message)
+	}
+	if note.Summary != "Revisión" || note.Severity != "normal" {
+		t.Fatalf("note = %+v, want summary=Revisión, severity=normal", note)
+	}
+
+	_, message = validateClinicalNoteCreate(ClinicalNoteCreate{ResidentID: residentID, Summary: "", Notes: "Sin novedades."})
+	if message == "" {
+		t.Fatal("validateClinicalNoteCreate() accepted empty summary")
+	}
+}
+
+func TestValidateMedicationEventCreate(t *testing.T) {
+	residentID := primitive.NewObjectID().Hex()
+	event, message := validateMedicationEventCreate(MedicationEventCreate{ResidentID: residentID, Medication: "Paracetamol", Dose: "500 mg", Status: "given"})
+	if message != "" {
+		t.Fatalf("validateMedicationEventCreate() unexpected error: %q", message)
+	}
+	if event.Medication != "Paracetamol" || event.Status != "given" {
+		t.Fatalf("event = %+v, want medication=Paracetamol and status=given", event)
+	}
+
+	_, message = validateMedicationEventCreate(MedicationEventCreate{ResidentID: residentID, Medication: "", Dose: "500 mg"})
+	if message == "" {
+		t.Fatal("validateMedicationEventCreate() accepted empty medication")
 	}
 }
 

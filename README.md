@@ -8,11 +8,11 @@ Centraliza residentes, habitaciones, alimentación, indicaciones médicas, medic
 
 > **Proyecto independiente:** CIMA no está asociado, afiliado ni desarrollado para terceros que utilicen nombres comerciales similares.
 
-## Estado del proyecto — base publicada v0.3, desarrollo posterior en curso
+## Estado del proyecto — versión técnica actualizada v0.6
 
-La última versión publicada con release/tag sigue siendo v0.3. El árbol de trabajo ya incluye CRUD y ficha de residentes, autenticación JWT, RBAC inicial, una primera interfaz de dashboard y pruebas de integración API/MongoDB aisladas; estos avances aún no se han asociado a un nuevo release/tag. El estado detallado está en [la especificación técnica v0.5](docs/ESPECIFICACION_TECNICA_CIMA_v0.5.md) y su [versión PDF](docs/ESPECIFICACION_TECNICA_CIMA_v0.5.pdf).
+La especificación técnica actual está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md). En ella se reflejan los avances verificados del árbol de trabajo: residentes, habitaciones, estadías, notas clínicas y eventos de medicación ya están implementados y validados en Docker.
 
-El entorno requiere únicamente Docker Desktop y Git. No es necesario instalar Go, Node.js ni MongoDB directamente en el computador.
+La última release/tag publicada sigue siendo v0.3, pero el estado real del proyecto está descrito en el documento v0.6 y no corresponde a un release formal todavía. El entorno requiere únicamente Docker Desktop y Git; no es necesario instalar Go, Node.js ni MongoDB en el equipo.
 
 ## Stack
 
@@ -161,6 +161,29 @@ CIMA/
 └── README.md
 ```
 
+## OAuth2 y autenticación federada
+
+El siguiente gran incremento del sistema será la autenticación OAuth2 para que usuarios puedan registrarse e iniciar sesión con Google y con cuentas Microsoft/Outlook. La arquitectura del backend se mantiene intacta: el proveedor externo valida la identidad y el sistema emitirá el mismo JWT local con permisos RBAC.
+
+### Objetivo funcional
+- Registro e inicio de sesión con Google.
+- Registro e inicio de sesión con Microsoft/Outlook / Microsoft Live Account.
+- Enlace de cuentas OAuth2 a usuarios locales existentes.
+- Protección con `state`, `PKCE` y validación estricta de `redirect_uri`.
+- Mantenimiento del modelo actual de permisos y de la sesión de la app.
+
+### Requisitos técnicos
+- `GET /auth/oauth/google/start`
+- `GET /auth/oauth/google/callback`
+- `GET /auth/oauth/microsoft/start`
+- `GET /auth/oauth/microsoft/callback`
+- `POST /auth/oauth/link`
+- `POST /auth/oauth/unlink`
+- colección `user_oauth_identities` para mapear provider + subject + email
+- variables de entorno para client IDs, secrets y URIs de callback
+
+La definición completa del diseño está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md).
+
 ## Funcionalidades previstas
 
 ### Residentes
@@ -197,26 +220,24 @@ Acciones relevantes como login/logout, cambios de residentes, información médi
 
 ## Estado funcional actual
 
-El proyecto todavía no es el MVP completo. El estado de desarrollo incluye:
+El proyecto ya no está en el punto de una base preliminar: el estado real del código incluye:
 
-- API Go funcionando
-- Conexión con MongoDB
+- API Go funcionando con MongoDB
 - Endpoint `/health`
-- CRUD de residentes: crear, listar, consultar por ID, editar y archivar sin borrar físicamente
-- Habitaciones: catálogo, asignación/liberación, ocupación y trazabilidad; protegidas por RBAC
+- CRUD de residentes con archivado lógico
+- Habitaciones: catálogo, asignación/liberación, ocupación y trazabilidad protegida por RBAC
+- Estadías: modelo, validación y rutas CRUD
+- Atención clínica: notas con severidad, observaciones y lista por residente
+- Medicación: eventos programados/administrados con registro por residente
 - Timestamps de creación, actualización y archivado
-- Ficha personal con contactos principal y de emergencia
-- Frontend React/TypeScript
-- Edición de identidad y ficha; confirmación para archivar
-- Validación backend y manejo de estados de carga/error/éxito
+- Frontend React/TypeScript con módulos visibles según permisos
+- Login, refresh y perfil autenticado
+- Gestión de usuarios por API y permisos por endpoint
 - Construcción completa mediante Docker
-- Pruebas unitarias Go de validaciones, JWT y RBAC; pruebas Vitest para permisos y fechas
-- Login, refresh, perfil autenticado, gestión de usuarios por API y permisos por endpoint
-- Login web y dashboard inicial con módulos visibles según permisos
-- Fechas de ficha en formato `dd/mm/aaaa`, con autoformato y calendario; API conserva `AAAA-MM-DD`
-- Mensajes del usuario en español; documento declarado UTF-8 y `es-CL`
+- Pruebas Go y build Vite ejecutados con Docker
+- Mensajes en español y compatibilidad de idioma `es-CL`
 
-Estadías, alimentación, atención clínica, medicamentos, auditoría, documentos y facturación aún están pendientes o tienen rutas placeholder. El siguiente módulo recomendado es estadías, vinculadas al historial de habitaciones. No usar datos reales de residentes: aún faltan controles de seguridad y privacidad para producción.
+Lo que falta antes de cerrar la primera versión operativa es principalmente: alimentación, facturación/documentos, auditoría real, administración de usuarios avanzada y la integración OAuth2 con Google/Microsoft, además de hardening de seguridad para producción.
 
 ## Seguridad
 
