@@ -33,11 +33,11 @@ func TestValidResidentStatus(t *testing.T) {
 
 func TestValidateRoomCreate(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       RoomCreate
-		wantCode    string
-		wantStatus  string
-		wantError   bool
+		name       string
+		input      RoomCreate
+		wantCode   string
+		wantStatus string
+		wantError  bool
 	}{
 		{
 			name:       "normalizes code and defaults availability",
@@ -184,6 +184,9 @@ func TestPermissionsForRole(t *testing.T) {
 	if len(permissionsForRole("invalid-role")) != 0 {
 		t.Fatal("permissionsForRole() accepted an unknown role")
 	}
+	if !validUserRole("pending") || len(permissionsForRole("pending")) != 0 {
+		t.Fatal("pending role must be recognized without granting permissions")
+	}
 }
 
 func TestRequirePermission(t *testing.T) {
@@ -317,6 +320,105 @@ func TestValidateMedicationEventCreate(t *testing.T) {
 	_, message = validateMedicationEventCreate(MedicationEventCreate{ResidentID: residentID, Medication: "", Dose: "500 mg"})
 	if message == "" {
 		t.Fatal("validateMedicationEventCreate() accepted empty medication")
+	}
+}
+
+func TestValidateDietPlanCreate(t *testing.T) {
+	residentID := primitive.NewObjectID().Hex()
+	plan, message := validateDietPlanCreate(DietPlanCreate{ResidentID: residentID, MealType: "lunch", Menu: "Sopa + pescado", Status: "planned"})
+	if message != "" {
+		t.Fatalf("validateDietPlanCreate() unexpected error: %q", message)
+	}
+	if plan.MealType != "lunch" || plan.Status != "planned" {
+		t.Fatalf("plan = %+v, want mealType=lunch and status=planned", plan)
+	}
+
+	_, message = validateDietPlanCreate(DietPlanCreate{ResidentID: residentID, MealType: "invalid", Menu: "Sopa"})
+	if message == "" {
+		t.Fatal("validateDietPlanCreate() accepted invalid meal type")
+	}
+}
+
+func TestOAuthPKCEChallenge(t *testing.T) {
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	want := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+	if got := oauthPKCEChallenge(verifier); got != want {
+		t.Fatalf("oauthPKCEChallenge() = %q, want %q", got, want)
+	}
+}
+
+func TestOAuthConfigRequiresCompleteCredentials(t *testing.T) {
+	t.Setenv("OAUTH_GOOGLE_CLIENT_ID", "google-client")
+	t.Setenv("OAUTH_GOOGLE_CLIENT_SECRET", "google-secret")
+	t.Setenv("OAUTH_GOOGLE_REDIRECT_URI", "http://localhost:8080/auth/oauth/google/callback")
+	google, enabled := oauthConfig("google")
+	if !enabled || google.authorizeURL == "" || google.tokenURL == "" {
+		t.Fatalf("oauthConfig(google) = (%+v, %t), want configured provider", google, enabled)
+	}
+
+	t.Setenv("OAUTH_MICROSOFT_CLIENT_ID", "")
+	if _, enabled := oauthConfig("microsoft"); enabled {
+		t.Fatal("oauthConfig(microsoft) enabled without complete credentials")
+	}
+	if _, enabled := oauthConfig("other"); enabled {
+		t.Fatal("oauthConfig() enabled an unsupported provider")
+	}
+}
+
+func TestOAuthEmailAllowlist(t *testing.T) {
+	t.Setenv("OAUTH_ALLOWED_DOMAINS", "example.com, care.example")
+	if !oauthEmailAllowed("staff@EXAMPLE.com") {
+		t.Fatal("oauthEmailAllowed() rejected an allowed domain")
+	}
+	if oauthEmailAllowed("staff@not-example.com") {
+		t.Fatal("oauthEmailAllowed() accepted a non-allowed domain")
+	}
+	if oauthEmailAllowed("invalid-email") {
+		t.Fatal("oauthEmailAllowed() accepted an invalid email")
+	}
+}
+
+func TestOAuthUsernameIsStableAndProviderScoped(t *testing.T) {
+	googleUsername := oauthUsername("google", "subject-123")
+	if googleUsername != oauthUsername("google", "subject-123") {
+		t.Fatal("oauthUsername() returned different usernames for the same identity")
+	}
+	if googleUsername == oauthUsername("microsoft", "subject-123") {
+		t.Fatal("oauthUsername() did not distinguish providers")
+	}
+}
+
+func TestOAuthCallbackRedirectDoesNotCacheOrLeakReferrer(t *testing.T) {
+	t.Setenv("OAUTH_FRONTEND_REDIRECT_URI", "http://localhost:5173/")
+	request := httptest.NewRequest(http.MethodGet, "/auth/oauth/google/callback", nil)
+	response := httptest.NewRecorder()
+	oauthCallbackRedirect(response, request, "#oauth=code&code=one-time")
+
+	if response.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusFound)
+	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	if got := response.Header().Get("Referrer-Policy"); got != "no-referrer" {
+		t.Fatalf("Referrer-Policy = %q, want no-referrer", got)
+	}
+	if got := response.Header().Get("Location"); !strings.Contains(got, "#oauth=code&code=one-time") || strings.Contains(got, "?oauth=") {
+		t.Fatalf("Location = %q, want OAuth data in fragment", got)
+	}
+}
+
+func TestOAuthCookieSecurityAttributes(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	response := httptest.NewRecorder()
+	setOAuthCookie(response, "cima_oauth_exchange", "nonce", "/auth/oauth/", time.Minute)
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookie count = %d, want 1", len(cookies))
+	}
+	cookie := cookies[0]
+	if cookie.Name != "cima_oauth_exchange" || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/auth/oauth/" {
+		t.Fatalf("OAuth cookie attributes = %+v, want HttpOnly, Secure, SameSite=Lax, and OAuth path", cookie)
 	}
 }
 

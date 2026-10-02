@@ -25,12 +25,12 @@ import (
 // Resident representa un residente de la residencia de adultos mayores.
 // Los datos básicos permiten identificar y gestionar la persona y su estado operativo.
 type Resident struct {
-	ID        interface{} `json:"id,omitempty" bson:"_id,omitempty"`
-	FirstName string      `json:"firstName" bson:"firstName"`
-	LastName  string      `json:"lastName" bson:"lastName"`
-	Status    string      `json:"status" bson:"status"`
-	CreatedAt *time.Time  `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-	UpdatedAt *time.Time  `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	ID         interface{} `json:"id,omitempty" bson:"_id,omitempty"`
+	FirstName  string      `json:"firstName" bson:"firstName"`
+	LastName   string      `json:"lastName" bson:"lastName"`
+	Status     string      `json:"status" bson:"status"`
+	CreatedAt  *time.Time  `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time  `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
 	ArchivedAt *time.Time  `json:"archivedAt,omitempty" bson:"archivedAt,omitempty"`
 }
 
@@ -50,15 +50,15 @@ type ResidentPatch struct {
 
 // Room representa una habitación física y su disponibilidad operativa.
 type Room struct {
-	ID               primitive.ObjectID    `json:"id" bson:"_id,omitempty"`
-	Code             string                `json:"code" bson:"code"`
-	Capacity         int                   `json:"capacity" bson:"capacity"`
-	Status           string                `json:"status" bson:"status"`
-	OccupantIDs      []primitive.ObjectID  `json:"occupantIds" bson:"occupantIds"`
-	Occupancy        int                   `json:"occupancy" bson:"-"`
+	ID                primitive.ObjectID    `json:"id" bson:"_id,omitempty"`
+	Code              string                `json:"code" bson:"code"`
+	Capacity          int                   `json:"capacity" bson:"capacity"`
+	Status            string                `json:"status" bson:"status"`
+	OccupantIDs       []primitive.ObjectID  `json:"occupantIds" bson:"occupantIds"`
+	Occupancy         int                   `json:"occupancy" bson:"-"`
 	AssignmentHistory []RoomAssignmentEvent `json:"-" bson:"assignmentHistory,omitempty"`
-	CreatedAt        *time.Time            `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-	UpdatedAt        *time.Time            `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	CreatedAt         *time.Time            `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt         *time.Time            `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
 }
 
 // RoomAssignmentRequest identifica al residente que se asigna o libera.
@@ -90,25 +90,25 @@ type RoomPatch struct {
 
 // Stay representa la estadía de un residente en una habitación durante un periodo concreto.
 type Stay struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
-	RoomID    primitive.ObjectID `json:"roomId" bson:"roomId"`
-	Status    string             `json:"status" bson:"status"`
-	CheckIn   *time.Time         `json:"checkIn,omitempty" bson:"checkIn,omitempty"`
-	CheckOut  *time.Time         `json:"checkOut,omitempty" bson:"checkOut,omitempty"`
-	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty"`
-	CreatedAt *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-	UpdatedAt *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	RoomID     primitive.ObjectID `json:"roomId" bson:"roomId"`
+	Status     string             `json:"status" bson:"status"`
+	CheckIn    *time.Time         `json:"checkIn,omitempty" bson:"checkIn,omitempty"`
+	CheckOut   *time.Time         `json:"checkOut,omitempty" bson:"checkOut,omitempty"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
 }
 
 // StayCreate define el payload mínimo para crear una estadía vinculada a un residente y una habitación.
 type StayCreate struct {
 	ResidentID string `json:"residentId"`
-	RoomID    string `json:"roomId"`
-	Status    string `json:"status"`
-	CheckIn   string `json:"checkIn"`
-	CheckOut  string `json:"checkOut"`
-	Notes     string `json:"notes"`
+	RoomID     string `json:"roomId"`
+	Status     string `json:"status"`
+	CheckIn    string `json:"checkIn"`
+	CheckOut   string `json:"checkOut"`
+	Notes      string `json:"notes"`
 }
 
 // StayPatch permite ajustar parcialmente la estadía y el periodo vinculado.
@@ -121,14 +121,14 @@ type StayPatch struct {
 
 // ClinicalNote registra la evolución clínica de un residente para la atención diaria.
 type ClinicalNote struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
-	Summary   string             `json:"summary" bson:"summary"`
-	Severity  string             `json:"severity" bson:"severity"`
-	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty"`
-	CreatedBy string             `json:"createdBy" bson:"createdBy"`
-	CreatedAt *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-	UpdatedAt *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	Summary    string             `json:"summary" bson:"summary"`
+	Severity   string             `json:"severity" bson:"severity"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy  string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
 }
 
 // ClinicalNoteCreate define el payload mínimo para crear una nota clínica.
@@ -163,6 +163,28 @@ type MedicationEventCreate struct {
 	Notes      string `json:"notes"`
 }
 
+// DietPlan representa la planificación de la alimentación para un residente en un turno concreto.
+type DietPlan struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	MealType   string             `json:"mealType" bson:"mealType"`
+	Menu       string             `json:"menu" bson:"menu"`
+	Status     string             `json:"status" bson:"status"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy  string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// DietPlanCreate define el payload mínimo para registrar una comida o dieta personalizada.
+type DietPlanCreate struct {
+	ResidentID string `json:"residentId"`
+	MealType   string `json:"mealType"`
+	Menu       string `json:"menu"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+}
+
 type ResidentContact struct {
 	Name         string `json:"name,omitempty" bson:"name,omitempty"`
 	Relationship string `json:"relationship,omitempty" bson:"relationship,omitempty"`
@@ -171,10 +193,10 @@ type ResidentContact struct {
 }
 
 type ResidentProfile struct {
-	DateOfBirth    string          `json:"dateOfBirth,omitempty" bson:"dateOfBirth,omitempty"`
-	Phone          string          `json:"phone,omitempty" bson:"phone,omitempty"`
-	Email          string          `json:"email,omitempty" bson:"email,omitempty"`
-	PrimaryContact ResidentContact `json:"primaryContact" bson:"primaryContact"`
+	DateOfBirth      string          `json:"dateOfBirth,omitempty" bson:"dateOfBirth,omitempty"`
+	Phone            string          `json:"phone,omitempty" bson:"phone,omitempty"`
+	Email            string          `json:"email,omitempty" bson:"email,omitempty"`
+	PrimaryContact   ResidentContact `json:"primaryContact" bson:"primaryContact"`
 	EmergencyContact ResidentContact `json:"emergencyContact" bson:"emergencyContact"`
 }
 
@@ -198,6 +220,8 @@ type ProfilePatch struct {
 type User struct {
 	ID           interface{} `json:"id,omitempty" bson:"_id,omitempty"`
 	Username     string      `json:"username" bson:"username"`
+	DisplayName  string      `json:"displayName,omitempty" bson:"displayName,omitempty"`
+	Email        string      `json:"email,omitempty" bson:"email,omitempty"`
 	PasswordHash string      `json:"-" bson:"passwordHash"`
 	Role         string      `json:"role" bson:"role"`
 	Permissions  []string    `json:"permissions,omitempty" bson:"permissions,omitempty"`
@@ -216,14 +240,16 @@ type AuthRefreshRequest struct {
 
 type authUserResponse struct {
 	Username    string   `json:"username"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Email       string   `json:"email,omitempty"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions,omitempty"`
 }
 
 type authSessionResponse struct {
-	Token        string             `json:"token"`
-	RefreshToken string            `json:"refreshToken"`
-	User         authUserResponse   `json:"user"`
+	Token        string           `json:"token"`
+	RefreshToken string           `json:"refreshToken"`
+	User         authUserResponse `json:"user"`
 }
 
 type jwtClaims struct {
@@ -235,6 +261,7 @@ type jwtClaims struct {
 // rolePermissions define los permisos base para cada rol del sistema.
 // Estos permisos sirven como base de control para la residencia y los módulos operativos.
 var rolePermissions = map[string][]string{
+	"pending": {},
 	"admin": {
 		"resident.read",
 		"resident.create",
@@ -312,12 +339,13 @@ type UserCreateRequest struct {
 
 // UserUpdateRequest permite cambiar el rol o los permisos de un usuario existente.
 type UserUpdateRequest struct {
-	Role        *string  `json:"role,omitempty"`
+	Role        *string   `json:"role,omitempty"`
 	Permissions *[]string `json:"permissions,omitempty"`
-	Password    *string  `json:"password,omitempty"`
+	Password    *string   `json:"password,omitempty"`
 }
 
 func main() {
+	_ = jwtSecretValue()
 	port := getenv("APP_PORT", "8080")
 	mongoURI := getenv("MONGO_URI", "mongodb://mongodb:27017")
 	dbName := getenv("MONGO_DATABASE", "cima")
@@ -390,8 +418,62 @@ func main() {
 	}); err != nil {
 		log.Fatalf("create medication event status index: %v", err)
 	}
+	dietPlanCollection := client.Database(dbName).Collection("diet_plans")
+	if _, err := dietPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create diet plan resident index: %v", err)
+	}
+	if _, err := dietPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "mealType", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create diet plan meal type index: %v", err)
+	}
+	if _, err := dietPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create diet plan status index: %v", err)
+	}
 	// userCollection guarda usuarios, roles y permisos para la autenticación del sistema.
 	userCollection := client.Database(dbName).Collection("users")
+	oauthIdentityCollection := client.Database(dbName).Collection("user_oauth_identities")
+	if _, err := oauthIdentityCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "provider", Value: 1}, {Key: "providerUserId", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		log.Fatalf("create oauth identity provider index: %v", err)
+	}
+	if _, err := oauthIdentityCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "userId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create oauth identity user index: %v", err)
+	}
+	oauthFlowCollection := client.Database(dbName).Collection("oauth_flows")
+	if _, err := oauthFlowCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "stateHash", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		log.Fatalf("create oauth state index: %v", err)
+	}
+	if _, err := oauthFlowCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}); err != nil {
+		log.Fatalf("create oauth state expiry index: %v", err)
+	}
+	oauthLoginCodeCollection := client.Database(dbName).Collection("oauth_login_codes")
+	if _, err := oauthLoginCodeCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "codeHash", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		log.Fatalf("create oauth login code index: %v", err)
+	}
+	if _, err := oauthLoginCodeCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}); err != nil {
+		log.Fatalf("create oauth login code expiry index: %v", err)
+	}
 	if err := seedDefaultAdminUser(context.Background(), userCollection); err != nil {
 		log.Fatalf("seed admin user: %v", err)
 	}
@@ -433,7 +515,7 @@ func main() {
 				return
 			}
 
-			jwtSecret := getenv("JWT_SECRET", "change-this-development-secret")
+			jwtSecret := jwtSecretValue()
 			accessToken, err := issueJWT(user.Username, user.Role, user.Permissions, jwtSecret, 15*time.Minute)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo generar el token de acceso."})
@@ -450,6 +532,8 @@ func main() {
 				RefreshToken: refreshToken,
 				User: authUserResponse{
 					Username:    user.Username,
+					DisplayName: user.DisplayName,
+					Email:       user.Email,
 					Role:        user.Role,
 					Permissions: user.Permissions,
 				},
@@ -466,7 +550,7 @@ func main() {
 				return
 			}
 
-			claims, err := parseJWT(input.RefreshToken, getenv("JWT_SECRET", "change-this-development-secret"))
+			claims, err := parseJWT(input.RefreshToken, jwtSecretValue())
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "El token de renovación no es válido."})
 				return
@@ -484,7 +568,7 @@ func main() {
 				return
 			}
 
-			newAccessToken, err := issueJWT(user.Username, user.Role, user.Permissions, getenv("JWT_SECRET", "change-this-development-secret"), 15*time.Minute)
+			newAccessToken, err := issueJWT(user.Username, user.Role, user.Permissions, jwtSecretValue(), 15*time.Minute)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo generar el token de acceso."})
 				return
@@ -498,7 +582,7 @@ func main() {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Falta el token de acceso."})
 				return
 			}
-			claims, err := parseJWT(token, getenv("JWT_SECRET", "change-this-development-secret"))
+			claims, err := parseJWT(token, jwtSecretValue())
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "El token no es válido."})
 				return
@@ -518,11 +602,14 @@ func main() {
 
 			writeJSON(w, http.StatusOK, authUserResponse{
 				Username:    user.Username,
+				DisplayName: user.DisplayName,
+				Email:       user.Email,
 				Role:        user.Role,
 				Permissions: user.Permissions,
 			})
 		})
 	})
+	registerOAuthRoutes(r, userCollection, oauthIdentityCollection, oauthFlowCollection, oauthLoginCodeCollection)
 
 	r.Route("/api/v1/users", func(r chi.Router) {
 		r.With(requirePermission("user.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
@@ -708,8 +795,8 @@ func main() {
 	})
 
 	r.Route("/api/v1/dashboard", func(r chi.Router) {
-			r.With(requirePermission("dashboard.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-				writeJSON(w, http.StatusOK, map[string]string{"status": "Panel disponible", "module": "crm-dashboard"})
+		r.With(requirePermission("dashboard.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "Panel disponible", "module": "crm-dashboard"})
 		})
 	})
 
@@ -734,6 +821,71 @@ func main() {
 		})
 		r.With(requirePermission("billing.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de facturación aún no está implementado."})
+		})
+	})
+
+	r.Route("/api/v1/diet-plans", func(r chi.Router) {
+		r.With(requirePermission("diet.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := dietPlanCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar las dietas."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			plans := make([]DietPlan, 0)
+			if err := cursor.All(ctx, &plans); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar las dietas."})
+				return
+			}
+			writeJSON(w, http.StatusOK, plans)
+		})
+		r.With(requirePermission("food.update")).Post("/", func(w http.ResponseWriter, req *http.Request) {
+			var input DietPlanCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+
+			plan, validationErr := validateDietPlanCreate(input)
+			if validationErr != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationErr})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+
+			now := time.Now().UTC()
+			plan.ResidentID = residentID
+			plan.CreatedBy = requestUsername(req)
+			plan.CreatedAt = &now
+			plan.UpdatedAt = &now
+
+			result, err := dietPlanCollection.InsertOne(ctx, plan)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo guardar la dieta."})
+				return
+			}
+			plan.ID = result.InsertedID.(primitive.ObjectID)
+			writeJSON(w, http.StatusCreated, plan)
 		})
 	})
 
@@ -838,8 +990,8 @@ func main() {
 				filter,
 				bson.M{
 					"$addToSet": bson.M{"occupantIds": residentID},
-					"$push":    bson.M{"assignmentHistory": event},
-					"$set":     bson.M{"updatedAt": now},
+					"$push":     bson.M{"assignmentHistory": event},
+					"$set":      bson.M{"updatedAt": now},
 				},
 				options.FindOneAndUpdate().SetReturnDocument(options.After),
 			).Decode(&room)
@@ -1706,7 +1858,7 @@ func requestUsername(req *http.Request) string {
 	if !ok {
 		return ""
 	}
-	claims, err := parseJWT(token, getenv("JWT_SECRET", "change-this-development-secret"))
+	claims, err := parseJWT(token, jwtSecretValue())
 	if err != nil {
 		return ""
 	}
@@ -1879,6 +2031,56 @@ func validateMedicationEventCreate(input MedicationEventCreate) (MedicationEvent
 		return MedicationEvent{}, "El identificador del residente no es válido."
 	}
 	return event, ""
+}
+
+// validDietMealType comprueba que el tipo de comida esté definido dentro del catálogo de alimentación.
+func validDietMealType(mealType string) bool {
+	switch strings.ToLower(strings.TrimSpace(mealType)) {
+	case "breakfast", "lunch", "dinner", "snack":
+		return true
+	default:
+		return false
+	}
+}
+
+// validDietStatus comprueba que el estado de la alimentación sea válido para cocina y atención.
+func validDietStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "planned", "served", "pending", "adjusted":
+		return true
+	default:
+		return false
+	}
+}
+
+// validateDietPlanCreate valida la planificación semanal y diaria de la alimentación de un residente.
+func validateDietPlanCreate(input DietPlanCreate) (DietPlan, string) {
+	plan := DietPlan{
+		MealType: strings.ToLower(strings.TrimSpace(input.MealType)),
+		Menu:     strings.TrimSpace(input.Menu),
+		Status:   strings.ToLower(strings.TrimSpace(input.Status)),
+		Notes:    strings.TrimSpace(input.Notes),
+	}
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return DietPlan{}, "El identificador del residente es obligatorio."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return DietPlan{}, "El identificador del residente no es válido."
+	}
+	if plan.Menu == "" {
+		return DietPlan{}, "El menú de alimentación es obligatorio."
+	}
+	if plan.MealType == "" {
+		plan.MealType = "lunch"
+	} else if !validDietMealType(plan.MealType) {
+		return DietPlan{}, "El tipo de comida debe ser breakfast, lunch, dinner o snack."
+	}
+	if plan.Status == "" {
+		plan.Status = "planned"
+	} else if !validDietStatus(plan.Status) {
+		return DietPlan{}, "El estado debe ser planned, served, pending o adjusted."
+	}
+	return plan, ""
 }
 
 // validateRoomCreate normaliza y comprueba los datos de una habitación nueva.
@@ -2054,7 +2256,7 @@ func requirePermission(permission string) func(http.Handler) http.Handler {
 				return
 			}
 
-			claims, err := parseJWT(token, getenv("JWT_SECRET", "change-this-development-secret"))
+			claims, err := parseJWT(token, jwtSecretValue())
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "El token no es válido."})
 				return
@@ -2125,6 +2327,14 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
+func jwtSecretValue() string {
+	value := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if value == "" {
+		log.Fatal("JWT_SECRET must be configured as a non-empty environment variable.")
+	}
+	return value
+}
+
 func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2132,6 +2342,7 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 
 			if origin != "" && origin == allowedOrigin {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")

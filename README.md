@@ -8,9 +8,9 @@ Centraliza residentes, habitaciones, alimentación, indicaciones médicas, medic
 
 > **Proyecto independiente:** CIMA no está asociado, afiliado ni desarrollado para terceros que utilicen nombres comerciales similares.
 
-## Estado del proyecto — versión técnica actualizada v0.6
+## Estado del proyecto — versión técnica actualizada v0.7
 
-La especificación técnica actual está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md). En ella se reflejan los avances verificados del árbol de trabajo: residentes, habitaciones, estadías, notas clínicas y eventos de medicación ya están implementados y validados en Docker.
+La especificación técnica actual está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md). En ella se reflejan los avances verificados: residentes, habitaciones, estadías, atención clínica, medicamentos, alimentación y autenticación OAuth2 para Google y Microsoft. La autenticación federada requiere registrar credenciales en los proveedores y guardarlas únicamente en `.env`.
 
 La última release/tag publicada sigue siendo v0.3, pero el estado real del proyecto está descrito en el documento v0.6 y no corresponde a un release formal todavía. El entorno requiere únicamente Docker Desktop y Git; no es necesario instalar Go, Node.js ni MongoDB en el equipo.
 
@@ -121,8 +121,17 @@ APP_ENV=development
 APP_PORT=8080
 MONGO_URI=mongodb://mongodb:27017
 MONGO_DATABASE=cima
-JWT_SECRET=change-this-development-secret
+JWT_SECRET=REPLACE_WITH_STRONG_PRIVATE_SECRET
 CORS_ORIGIN=http://localhost:5173
+OAUTH_GOOGLE_CLIENT_ID=
+OAUTH_GOOGLE_CLIENT_SECRET=
+OAUTH_GOOGLE_REDIRECT_URI=http://localhost:8080/auth/oauth/google/callback
+OAUTH_MICROSOFT_CLIENT_ID=
+OAUTH_MICROSOFT_CLIENT_SECRET=
+OAUTH_MICROSOFT_TENANT_ID=common
+OAUTH_MICROSOFT_REDIRECT_URI=http://localhost:8080/auth/oauth/microsoft/callback
+OAUTH_FRONTEND_REDIRECT_URI=http://localhost:5173/
+OAUTH_ALLOWED_DOMAINS=
 ```
 
 **Nunca subas `.env` al repositorio.** En producción, usa un gestor de secretos y un `JWT_SECRET` fuerte y aleatorio.
@@ -163,26 +172,9 @@ CIMA/
 
 ## OAuth2 y autenticación federada
 
-El siguiente gran incremento del sistema será la autenticación OAuth2 para que usuarios puedan registrarse e iniciar sesión con Google y con cuentas Microsoft/Outlook. La arquitectura del backend se mantiene intacta: el proveedor externo valida la identidad y el sistema emitirá el mismo JWT local con permisos RBAC.
+El backend soporta inicio de sesión y registro con Google y Microsoft/Outlook. Usa `state`, PKCE S256, callbacks fijados por configuración y códigos de canje de un solo uso; después emite los mismos JWT locales con RBAC. Los client secrets permanecen en `.env` y no se envían al frontend.
 
-### Objetivo funcional
-- Registro e inicio de sesión con Google.
-- Registro e inicio de sesión con Microsoft/Outlook / Microsoft Live Account.
-- Enlace de cuentas OAuth2 a usuarios locales existentes.
-- Protección con `state`, `PKCE` y validación estricta de `redirect_uri`.
-- Mantenimiento del modelo actual de permisos y de la sesión de la app.
-
-### Requisitos técnicos
-- `GET /auth/oauth/google/start`
-- `GET /auth/oauth/google/callback`
-- `GET /auth/oauth/microsoft/start`
-- `GET /auth/oauth/microsoft/callback`
-- `POST /auth/oauth/link`
-- `POST /auth/oauth/unlink`
-- colección `user_oauth_identities` para mapear provider + subject + email
-- variables de entorno para client IDs, secrets y URIs de callback
-
-La definición completa del diseño está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md).
+Configura en Google Cloud Console y Microsoft Entra ID los callbacks exactos indicados en `.env.example`. Al completar esas credenciales, `docker compose up --build` habilita los botones automáticamente. Las cuentas nuevas quedan en rol `pending`, sin permisos, hasta que un administrador les asigne un rol aprobado. El enlace automático por correo está deshabilitado para evitar apropiación de cuentas existentes.
 
 ## Funcionalidades previstas
 

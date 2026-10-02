@@ -8,9 +8,9 @@ lang: es-CL
 
 # Especificación técnica
 
-**Versión del documento:** 0.6  
+**Versión del documento:** 0.7
 **Fecha de corte:** 30 de septiembre de 2026  
-**Estado:** backend y frontend con residentes, habitaciones, estancias, notas clínicas y eventos de medicación implementados; módulos de alimentación, facturación, documentos, auditoría y OAuth2 quedan como próximos incrementos.
+**Estado:** backend y frontend con residentes, habitaciones, estancias, atención clínica, medicación y alimentación; OAuth2 base para Google y Microsoft implementado. Facturación, documentos y auditoría funcional siguen pendientes.
 
 ## Historial
 
@@ -18,6 +18,7 @@ lang: es-CL
 - **0.4:** CRUD de residentes, ficha editable, archivado lógico y timestamps.
 - **0.5:** login JWT, renovación de sesión, usuarios/roles, RBAC por endpoint, dashboard inicial, habitaciones, historial de asignación y validación de módulos pendientes.
 - **0.6:** estancias, notas clínicas y eventos de medicación implementados; actualización del estado real del proyecto y definición de arquitectura OAuth2 para Microsoft/Outlook y Google.
+- **0.7:** OAuth2 Google/Microsoft con `state`, PKCE S256, registro en rol pendiente, intercambio de código efímero por JWT local y configuración Docker por entorno.
 
 ## 1. Propósito
 
@@ -43,24 +44,24 @@ MongoDB
 | Área | Estado actual | Observación |
 |---|---|---|
 | Entorno | Docker Compose con MongoDB, API Go y frontend React/Vite funcionando. | El host solo requiere Docker Desktop y Git. |
-| Autenticación | Login local, JWT de acceso y refresh, RBAC completo por permiso y perfil autenticado. | Requiere fortalecimiento para producción. |
+| Autenticación | Login local y OAuth2 Google/Microsoft, JWT de acceso/refresh y RBAC por permiso. | Nuevas cuentas federadas quedan pendientes de aprobación; requiere hardening adicional para producción. |
 | Residentes | CRUD completo, archivado lógico, ficha/identidad y contacto. | Falta búsqueda, paginación y restauración de archivos. |
 | Habitaciones | Catálogo, capacidad, disponibilidad, ocupación, asignación/liberación, historial de cambios. | Falta mantenimiento o baja formal de habitaciones. |
 | Estadías | Modelo, validación, creación y lectura implementados. | Falta integración completa con flujo financiero y auditoría. |
 | Atención clínica | Notas clínicas con validación, colección y formulario UI. | Falta edición/eliminado con auditoría y permisos específicos por recurso. |
 | Medicación | Eventos de administración con colección, validación y formulario UI. | Falta historial completo, marcación por residente y acciones de administración. |
 | Dashboard | Vista base con módulos y métricas simples. | No es todavía un dashboard operativo completo. |
-| Alimentación | Sin módulo funcional y sin permisos definidos reales. | Siguiente bloque pendiente. |
+| Alimentación | Planes por residente y turno con API, permisos y UI. | Ampliar con restricciones, alergias y dietas clínicas estructuradas. |
 | Facturación | Rutas placeholder. | Requiere diseño de cargos, pagos y cuotas. |
 | Documentos | Rutas placeholder. | Requiere almacenamiento seguro y permisos por documento. |
 | Auditoría | GET protegido y trazabilidad parcial. | Necesita registro de acciones sensibles y minimización de datos. |
-| OAuth2 | Pendiente de diseño e implementación. | Requerirá providers Microsoft y Google. |
+| OAuth2 | Inicio/callback, perfiles Google/Microsoft, colección de identidades y canje de sesión implementados. | Credenciales externas requieren configuración; enlace federado a cuentas locales existentes queda pendiente. |
 
 ## 3. Stack y ejecución
 
-- **API:** Go 1.23, Chi, MongoDB Go Driver, JWT HS256, bcrypt y próximos proveedores OAuth2.
+- **API:** Go 1.23, Chi, MongoDB Go Driver, JWT HS256, bcrypt y OAuth2 Google/Microsoft.
 - **Frontend:** React 18 + TypeScript + Vite.
-- **Datos:** MongoDB 7. Colecciones activas: `residents`, `users`, `rooms`, `stays`, `clinical_notes`, `medication_events`.
+- **Datos:** MongoDB 7. Colecciones activas: `residents`, `users`, `rooms`, `stays`, `clinical_notes`, `medication_events`, `diet_plans`, `user_oauth_identities`, `oauth_flows` y `oauth_login_codes`.
 - **Ejecución:** Docker Compose en modo Docker-first.
 - **Servicios locales:**
   - Frontend: `http://localhost:5173`
@@ -89,6 +90,10 @@ Los usuarios se autentican con usuario/contraseña local y JWT.
 POST /auth/login     público
 POST /auth/refresh   público con refresh token
 GET  /auth/me        requiere token válido
+GET  /auth/oauth/providers
+GET  /auth/oauth/{google|microsoft}/start
+GET  /auth/oauth/{google|microsoft}/callback
+POST /auth/oauth/exchange
 ```
 
 Reglas vigentes:
@@ -98,6 +103,10 @@ Reglas vigentes:
 - Contraseña: bcrypt.
 - RBAC: permisos por ruta y middleware backend.
 - Frontend: almacena tokens en sessionStorage y trata 401 como renovación o cierre de sesión.
+- OAuth2: `state` aleatorio con hash almacenado, cookie `HttpOnly`/`SameSite=Lax` para correlación, PKCE S256, secretos solo en backend y código de sesión de un solo uso vinculado al navegador.
+- Registro federado: se crea un usuario `pending` y se inicia sesión automáticamente, pero no obtiene permisos ni acceso a datos hasta que un administrador le asigne un rol.
+- La administración de usuarios permite revisar nombre/correo del proveedor y asignar un rol aprobado.
+- No se vincula automáticamente una identidad por correo a una cuenta local preexistente.
 
 ### Riesgos actuales
 
@@ -131,6 +140,7 @@ Roles relevantes:
 | `nurse` | Residentes, notas clínicas y medicación. |
 | `reception` | Residentes y habitaciones. |
 | `accounting` | Cargos/pagos y dashboard. |
+| `pending` | Sin permisos; requiere aprobación administrativa. |
 
 La UI oculta módulos según permisos, pero el backend sigue siendo la fuente de verdad.
 
@@ -159,6 +169,8 @@ La UI oculta módulos según permisos, pero el backend sigue siendo la fuente de
 | `POST /api/v1/medical/` | `medical.write` | Implementado. |
 | `GET /api/v1/medication-events/` | `medication.read` | Implementado. |
 | `POST /api/v1/medication-events/` | `medication.write` | Implementado. |
+| `GET /api/v1/diet-plans/` | `diet.read` | Implementado. |
+| `POST /api/v1/diet-plans/` | `food.update` | Implementado. |
 | `GET /api/v1/dashboard/` | `dashboard.read` | Base implementada. |
 | `GET /api/v1/audit/` | `audit.read` | Base protegida. |
 | `GET /api/v1/billing/` | `billing.read` | Placeholder. |
@@ -240,15 +252,14 @@ type MedicationEvent struct {
 
 ## 9. Qué falta por completar
 
-1. Alimentación como módulo operativo independiente.
-2. Facturación, pagos, cargos y estados de cuenta.
-3. Documentación privada y almacenamiento seguro.
-4. Auditoría real y trazabilidad de cambios sensibles.
-5. UX de administración de usuarios y roles.
-6. OAuth2 para login con Microsoft/Outlook y Google.
-7. Hardening antes de producción: HTTPS, CORS estricto, secretos por entorno, rate limiting, monitoring, backups.
+1. Facturación, pagos, cargos y estados de cuenta.
+2. Documentación privada y almacenamiento seguro.
+3. Auditoría real y trazabilidad de cambios sensibles.
+4. Enlace/desvinculación de proveedores a cuentas locales existentes.
+5. Verificación real de login OAuth con credenciales registradas en Google y Entra ID.
+6. Hardening antes de producción: HTTPS, rate limiting, monitoring, backups y gestión centralizada de secretos.
 
-## 10. Propuesta de integración OAuth2
+## 10. Integración OAuth2 implementada
 
 ### Objetivo
 
@@ -261,11 +272,12 @@ El diseño debe ser compatible con el modelo actual de usuarios locales y con la
 - El backend es el único punto de autenticación.
 - Los proveedores OAuth2 solo validan identidad del usuario y devuelven claims.
 - El sistema local conserva `username`, `role`, `permissions` y `passwordHash` para cuentas internas.
-- El usuario externo se vincula a un registro local mediante email o subject provider.
+- La identidad externa se vincula a un usuario local por `provider + subject`; nunca se enlaza automáticamente solo por email.
 - El login con proveedor externo es una opción, no reemplaza la autenticación local.
-- La administración sigue realizándose con RBAC local.
+- El registro crea un usuario `pending` sin permisos; un administrador debe asignar un rol aprobado desde la pantalla de usuarios.
+- Las credenciales de OAuth existen únicamente en el backend mediante variables de entorno.
 
-### Modelos sugeridos
+### Identidad persistida
 
 ```go
 type UserOAuthIdentity struct {
@@ -274,26 +286,24 @@ type UserOAuthIdentity struct {
     Provider        string             `json:"provider" bson:"provider"` // google, microsoft
     ProviderUserID  string             `json:"providerUserId" bson:"providerUserId"`
     Email           string             `json:"email" bson:"email"`
-    EmailVerified   bool               `json:"emailVerified" bson:"emailVerified"`
     Name            string             `json:"name,omitempty" bson:"name,omitempty"`
-    PictureURL      string             `json:"pictureUrl,omitempty" bson:"pictureUrl,omitempty"`
-    CreatedAt       *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-    UpdatedAt       *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+    CreatedAt       time.Time          `json:"createdAt" bson:"createdAt"`
+    UpdatedAt       time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 ```
 
-Además, se recomienda una colección `user_oauth_identities` con índices por `provider`, `providerUserId`, `email` y `userId`.
+La colección `user_oauth_identities` tiene un índice único compuesto por `provider` y `providerUserId`, más un índice por `userId`. Los flujos OAuth y los códigos de canje se guardan con hash y vencimiento TTL.
 
 ### Flujo funcional
 
 1. El usuario pulsa “Continuar con Google” o “Continuar con Microsoft”.
 2. El frontend llama a `/auth/oauth/{provider}/start`.
-3. El backend genera un `state` cifrado y redirige al endpoint de autorización del proveedor.
+3. El backend crea `state` aleatorio, challenge PKCE S256 y cookie `HttpOnly`/`SameSite=Lax`, y redirige al proveedor.
 4. El proveedor devuelve un `code` al `redirect_uri`.
 5. El backend intercambia `code` por `token` y obtiene user info con scopes mínimos.
-6. El backend valida email y genera o enlaza un usuario local.
-7. El backend emite JWT local para la sesión actual.
-8. El frontend guarda el access token + refresh token y continúa normalmente.
+6. El backend resuelve la identidad por `provider + subject`; para una identidad nueva crea un usuario local `pending` sin permisos.
+7. El backend emite JWT local también para el rol `pending`, que no tiene permisos; la UI muestra el estado de aprobación sin habilitar datos protegidos.
+8. El callback devuelve un código efímero vinculado al navegador; el frontend lo canjea y guarda los JWT en `sessionStorage`.
 
 ### Endpoints propuestos
 
@@ -305,6 +315,7 @@ GET  /auth/oauth/microsoft/callback
 POST /auth/oauth/link
 POST /auth/oauth/unlink
 GET  /auth/oauth/providers
+POST /auth/oauth/exchange
 ```
 
 ### Mapeo de claims
@@ -314,22 +325,21 @@ GET  /auth/oauth/providers
 | Google | `email`, `sub`, `name`, `picture` | Identidad y avatar. |
 | Microsoft | `preferred_username`, `email`, `sub`, `name`, `oid` | Identidad y usuario único. |
 
-### Regla de vinculación
+### Regla de identidad y aprobación
 
-- Si el email ya existe en `users` y no tiene vínculo OAuth, se puede enlazar con confirmación.
-- Si el email ya tiene un `UserOAuthIdentity` del mismo provider, se inicia sesión automáticamente.
-- Si el usuario ya existe con un mismo email pero sin OAuth, se puede pedir “enlazar cuenta” o “continuar con cuenta local”.
-- Si el cliente no tiene cuenta local, se crea un usuario local con rol por defecto (por ejemplo `manager` o `nurse` según política), y se vincula con el proveedor.
+- Una identidad ya registrada por el mismo proveedor inicia sesión si su usuario local tiene un rol aprobado.
+- El email no se usa como llave para asociar una identidad a cuentas locales existentes.
+- Las nuevas cuentas requieren aprobación explícita y asignación de rol desde administración de usuarios.
 
 ### Seguridad
 
-- `state` con firma/nonce para prevenir CSRF.
+- `state` aleatorio, persistido como hash y vinculado a cookie `HttpOnly` para prevenir CSRF.
 - `PKCE` requerido para OAuth2 con proveedores modernos.
-- `redirect_uri` registrado y estrictamente validado.
+- `redirect_uri` fijo por configuración de backend, nunca recibido desde el navegador.
 - `client_secret` solo en backend.
 - almacenamiento seguro de secretos en variables de entorno o secret manager.
-- imposition de email verificado y mapeo de providerUserId.
-- bloqueo de cuentas si el email no pertenece al dominio autorizado del centro.
+- código de sesión de vida corta, uso único y ligado a una cookie temporal del mismo navegador.
+- allowlist opcional de dominios mediante `OAUTH_ALLOWED_DOMAINS`; no sustituye la aprobación de cuenta.
 
 ### Variables de entorno propuestas
 
@@ -342,8 +352,7 @@ OAUTH_MICROSOFT_CLIENT_ID=...
 OAUTH_MICROSOFT_CLIENT_SECRET=...
 OAUTH_MICROSOFT_TENANT_ID=common
 OAUTH_MICROSOFT_REDIRECT_URI=http://localhost:8080/auth/oauth/microsoft/callback
-
-OAUTH_SESSION_SECRET=...
+OAUTH_FRONTEND_REDIRECT_URI=http://localhost:5173/
 OAUTH_ALLOWED_DOMAINS=example.com,midominio.cl
 ```
 
@@ -375,11 +384,11 @@ La integración OAuth2 no reemplaza el modelo JWT actual, sino que se añade un 
 
 ## 11. Roadmap recomendado
 
-### Fase 1 — OAuth2 base
+### Fase 1 — OAuth2 base (implementada; falta validar credenciales reales)
 
 - Registro de proveedores en backend.
 - Endpoints de inicio/callback.
-- Vínculo de usuario con email.
+- Registro por subject del proveedor con aprobación administrativa.
 - Generación de JWT interno.
 - UI de botón “Iniciar sesión con Google/Microsoft”.
 
@@ -387,7 +396,7 @@ La integración OAuth2 no reemplaza el modelo JWT actual, sino que se añade un 
 
 - Enlace/desvinculación de cuentas por usuario.
 - Solicitud de verificación de email.
-- Restricción por dominio y roles.
+- Restricción opcional por dominio y asignación de roles aprobados.
 - Auditoría de login externo.
 
 ### Fase 3 — producción
@@ -401,14 +410,14 @@ La integración OAuth2 no reemplaza el modelo JWT actual, sino que se añade un 
 
 Se considera cerrado cuando:
 
-1. La autenticación con Google y Microsoft funciona en entorno Docker.
-2. El backend valida `state`, `PKCE` y los emails autorizados.
-3. Los usuarios se enlazan de manera segura a una cuenta local.
-4. El frontend confirma registro/inicio de sesión con ambos proveedores.
-5. La sesión resultante usa el mismo mecanismo JWT/RBAC ya implementado.
-6. Existen pruebas unitarias e integración para login externo, enlace, rechazo y errores.
-7. No hay secretos ni client IDs en Git ni en código fuente.
+1. Los proveedores aparecen cuando tienen credenciales configuradas en el backend.
+2. El backend valida state, PKCE, callback fijado y el canje vinculado al navegador.
+3. El registro nuevo queda sin permisos hasta aprobación administrativa.
+4. Los usuarios aprobados reciben la misma sesión JWT/RBAC local.
+5. Existen pruebas unitarias para PKCE, allowlist, state/callback, cookie y configuración.
+6. El login real con cada proveedor debe validarse tras configurar credenciales válidas.
+7. No hay client secrets en Git ni en el código fuente.
 
 ## 13. Conclusión
 
-CIMA ya ha consolidado la base operativa y de seguridad local: residentes, habitaciones, estancias, atención clínica y medicación. La siguiente etapa estratégica debe ser la expansión funcional del módulo de alimentación y, paralelo a ello, la incorporación segura de OAuth2 para Microsoft/Outlook y Google, preservando la arquitectura actual, los permisos por rol y el flujo Docker-first del proyecto.
+CIMA cuenta con autenticación local y la base de autenticación federada Google/Microsoft integrada con JWT y RBAC. El siguiente bloque funcional es facturación, seguido de documentos y auditoría. La validación interactiva OAuth queda pendiente de registrar credenciales en cada proveedor y mantenerlas en `.env` o en un gestor de secretos.

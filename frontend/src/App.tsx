@@ -3,9 +3,14 @@ import {
   apiFetch,
   authenticate,
   clearSession,
+  completeOAuthLogin,
+  fetchOAuthProviders,
   hasPermission,
   hasStoredSession,
+  refreshAuthenticatedUser,
+  startOAuthLogin,
   type AuthUser,
+  type OAuthProvider,
 } from "./auth";
 import {
   formatDateForDisplay,
@@ -23,6 +28,15 @@ type Resident = {
   firstName: string;
   lastName: string;
   status: ResidentStatus | string;
+};
+
+type ManagedUser = {
+  id: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  role: string;
+  permissions?: string[];
 };
 
 type RoomStatus = "available" | "maintenance" | "closed";
@@ -79,6 +93,17 @@ type MedicationEvent = {
   createdAt?: string;
 };
 
+type DietPlan = {
+  id: string;
+  residentId: string;
+  mealType: "breakfast" | "lunch" | "dinner" | "snack" | string;
+  menu: string;
+  status: "planned" | "served" | "pending" | "adjusted" | string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
 type Contact = {
   name: string;
   relationship: string;
@@ -112,6 +137,8 @@ function permissionLabel(permission: string) {
     "medical.write": "Registrar atención clínica",
     "medication.read": "Consultar medicamentos",
     "medication.write": "Registrar medicamentos",
+    "diet.read": "Consultar alimentación",
+    "food.update": "Registrar alimentación",
     "billing.read": "Consultar facturación",
     "billing.write": "Gestionar facturación",
     "document.read": "Consultar documentos",
@@ -177,6 +204,14 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginSaving, setLoginSaving] = useState(false);
+  const [approvalRefreshing, setApprovalRefreshing] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+  const [oauthProviders, setOAuthProviders] = useState<OAuthProvider[]>([]);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [managedUserRoles, setManagedUserRoles] = useState<Record<string, string>>({});
+  const [managedUsersLoading, setManagedUsersLoading] = useState(false);
+  const [managedUsersError, setManagedUsersError] = useState("");
+  const [managedUserSaving, setManagedUserSaving] = useState("");
   const [activeView, setActiveView] = useState("dashboard");
   const [dashboardStatus, setDashboardStatus] = useState("");
   const [dashboardError, setDashboardError] = useState("");
@@ -224,6 +259,16 @@ export default function App() {
   const [medicationSchedule, setMedicationSchedule] = useState("");
   const [medicationStatus, setMedicationStatus] = useState("scheduled");
   const [medicationNotes, setMedicationNotes] = useState("");
+  const [dietPlans, setDietPlans] = useState<DietPlan[]>([]);
+  const [dietPlansLoading, setDietPlansLoading] = useState(false);
+  const [dietPlansSaving, setDietPlansSaving] = useState(false);
+  const [dietPlanError, setDietPlanError] = useState("");
+  const [dietPlanSuccess, setDietPlanSuccess] = useState("");
+  const [dietPlanResidentId, setDietPlanResidentId] = useState("");
+  const [dietPlanMealType, setDietPlanMealType] = useState("lunch");
+  const [dietPlanMenu, setDietPlanMenu] = useState("");
+  const [dietPlanStatus, setDietPlanStatus] = useState("planned");
+  const [dietPlanNotes, setDietPlanNotes] = useState("");
   const [selectedResident, setSelectedResident] = useState<Resident | null>(null);
   const [profile, setProfile] = useState<ResidentProfile>(emptyProfile);
   const datePickerRef = useRef<HTMLInputElement>(null);
@@ -238,6 +283,8 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const oauthCallbackCode = useRef<string | null>(null);
+  const oauthCallbackPromise = useRef<Promise<AuthUser> | null>(null);
 
   // Estados de mensajes para feedback visual del usuario en la interfaz de gestión.
   const [error, setError] = useState("");
@@ -258,6 +305,57 @@ export default function App() {
       }
     };
     window.addEventListener("cima:session-expired", expireSession);
+
+    void fetchOAuthProviders()
+      .then((providers) => {
+        if (mounted) setOAuthProviders(providers);
+      })
+      .catch(() => {
+        if (mounted) setOAuthProviders([]);
+      });
+
+    const oauthFragment = new URLSearchParams(window.location.hash.slice(1));
+    const oauthStatus = oauthFragment.get("oauth");
+    const oauthCode = oauthStatus === "code" ? oauthFragment.get("code") : null;
+    if (oauthCode) oauthCallbackCode.current = oauthCode;
+    if (oauthStatus) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+
+    if (oauthCallbackCode.current) {
+      if (!oauthCallbackPromise.current) {
+        oauthCallbackPromise.current = completeOAuthLogin(oauthCallbackCode.current)
+          .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(await getApiError(response, "No se pudo iniciar sesión con el proveedor."));
+          }
+          return (await response.json()) as AuthUser;
+          });
+      }
+      void oauthCallbackPromise.current
+        .then((currentUser) => {
+          if (mounted) {
+            setUser(currentUser);
+            setActiveView("dashboard");
+          }
+        })
+        .catch((error: unknown) => {
+          if (mounted) setLoginError(userFacingError(error, "No se pudo completar el acceso federado."));
+        })
+        .finally(() => {
+          if (mounted) setAuthChecking(false);
+        });
+      return () => {
+        mounted = false;
+        window.removeEventListener("cima:session-expired", expireSession);
+      };
+    }
+
+    if (oauthStatus === "pending") {
+      setLoginError("Tu registro fue recibido. Un administrador debe aprobar la cuenta antes del primer acceso.");
+    } else if (oauthStatus === "error") {
+      setLoginError("No se pudo verificar la cuenta con el proveedor. Inténtalo nuevamente.");
+    }
 
     if (!hasStoredSession()) {
       setAuthChecking(false);
@@ -313,6 +411,28 @@ export default function App() {
     setActiveView("dashboard");
   }
 
+  // handleApprovalRefresh consulta los permisos actuales tras la aprobación de una cuenta federada.
+  async function handleApprovalRefresh() {
+    setApprovalError("");
+    setApprovalRefreshing(true);
+    try {
+      const currentUser = await refreshAuthenticatedUser();
+      if (!currentUser) {
+        throw new Error("No se pudo actualizar el acceso. Inicia sesión nuevamente.");
+      }
+      if (currentUser.role === "pending") {
+        setApprovalError("La cuenta todavía está pendiente de aprobación.");
+        return;
+      }
+      setUser(currentUser);
+      setActiveView("dashboard");
+    } catch (error) {
+      setApprovalError(userFacingError(error, "No se pudo comprobar la aprobación."));
+    } finally {
+      setApprovalRefreshing(false);
+    }
+  }
+
   // loadResidents consulta la lista de residentes desde la API del backend.
   const loadResidents = useCallback(async () => {
     if (!hasPermission(user, "resident.read")) {
@@ -343,6 +463,53 @@ export default function App() {
       setLoading(false);
     }
   }, [user]);
+
+  // loadManagedUsers obtiene las cuentas para que una persona administradora apruebe sus roles.
+  const loadManagedUsers = useCallback(async () => {
+    if (!hasPermission(user, "user.read")) return;
+    setManagedUsersLoading(true);
+    setManagedUsersError("");
+    try {
+      const response = await apiFetch("/users/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar los usuarios."));
+      }
+      const accounts = (await response.json()) as ManagedUser[];
+      setManagedUsers(accounts);
+      setManagedUserRoles(Object.fromEntries(accounts.map((account) => [account.id, account.role])));
+    } catch (err) {
+      setManagedUsersError(userFacingError(err, "No se pudieron cargar los usuarios."));
+    } finally {
+      setManagedUsersLoading(false);
+    }
+  }, [user]);
+
+  // handleManagedUserRoleChange guarda el rol aprobado en el backend y refresca la lista administrativa.
+  async function handleManagedUserRoleChange(event: FormEvent<HTMLFormElement>, userId: string) {
+    event.preventDefault();
+    const role = managedUserRoles[userId];
+    if (!role) return;
+    setManagedUsersError("");
+    setManagedUserSaving(userId);
+    try {
+      const response = await apiFetch(`/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo actualizar el rol."));
+      }
+      setManagedUsers((accounts) => accounts.map((account) => account.id === userId ? { ...account, role } : account));
+    } catch (err) {
+      setManagedUsersError(userFacingError(err, "No se pudo actualizar el rol."));
+    } finally {
+      setManagedUserSaving("");
+    }
+  }
+
+  useEffect(() => {
+    if (user && activeView === "users") void loadManagedUsers();
+  }, [user, activeView, loadManagedUsers]);
 
   // loadResidents solo consulta datos cuando la sesión tiene el permiso de lectura.
   useEffect(() => {
@@ -528,12 +695,33 @@ export default function App() {
     }
   }, [user]);
 
+  const loadDietPlans = useCallback(async () => {
+    if (!hasPermission(user, "diet.read")) return;
+    setDietPlansLoading(true);
+    setDietPlanError("");
+    try {
+      const response = await apiFetch("/diet-plans/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las dietas."));
+      }
+      const data = (await response.json()) as DietPlan[];
+      setDietPlans(data.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")));
+    } catch (err) {
+      setDietPlanError(userFacingError(err, "No se pudieron cargar las dietas."));
+    } finally {
+      setDietPlansLoading(false);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user && activeView === "clinical") {
       void loadClinicalNotes();
       void loadMedicationEvents();
     }
-  }, [user, activeView, loadClinicalNotes, loadMedicationEvents]);
+    if (user && activeView === "food") {
+      void loadDietPlans();
+    }
+  }, [user, activeView, loadClinicalNotes, loadMedicationEvents, loadDietPlans]);
 
   async function handleClinicalSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -614,6 +802,47 @@ export default function App() {
       setMedicationError(userFacingError(err, "No se pudo registrar el medicamento."));
     } finally {
       setMedicationSaving(false);
+    }
+  }
+
+  async function handleDietPlanSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dietPlanResidentId) {
+      setDietPlanError("Selecciona un residente.");
+      return;
+    }
+    if (!dietPlanMenu.trim()) {
+      setDietPlanError("El menú de la alimentación es obligatorio.");
+      return;
+    }
+    setDietPlanError("");
+    setDietPlanSuccess("");
+    setDietPlansSaving(true);
+    try {
+      const response = await apiFetch("/diet-plans/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: dietPlanResidentId,
+          mealType: dietPlanMealType,
+          menu: dietPlanMenu.trim(),
+          status: dietPlanStatus,
+          notes: dietPlanNotes.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la alimentación."));
+      }
+      setDietPlanSuccess("Dieta guardada correctamente.");
+      setDietPlanResidentId("");
+      setDietPlanMealType("lunch");
+      setDietPlanMenu("");
+      setDietPlanStatus("planned");
+      setDietPlanNotes("");
+      await loadDietPlans();
+    } catch (err) {
+      setDietPlanError(userFacingError(err, "No se pudo guardar la alimentación."));
+    } finally {
+      setDietPlansSaving(false);
     }
   }
 
@@ -934,6 +1163,7 @@ export default function App() {
     { id: "rooms", label: "Habitaciones", permissions: ["room.read"] },
     { id: "stays", label: "Estadías", permissions: ["stay.read"] },
     { id: "clinical", label: "Atención clínica", permissions: ["medical.read", "medication.read"] },
+    { id: "food", label: "Alimentación", permissions: ["diet.read", "food.update"] },
     { id: "billing", label: "Facturación", permissions: ["billing.read"] },
     { id: "documents", label: "Documentos", permissions: ["document.read"] },
     { id: "users", label: "Usuarios", permissions: ["user.read"] },
@@ -943,6 +1173,7 @@ export default function App() {
     ? activeView
     : modules[0]?.id ?? "none";
   const roleLabels: Record<string, string> = {
+    pending: "Pendiente de aprobación",
     admin: "Administración",
     manager: "Dirección",
     nurse: "Enfermería",
@@ -1002,6 +1233,25 @@ export default function App() {
               {loginSaving ? "Ingresando..." : "Ingresar"}
             </button>
           </form>
+          {oauthProviders.length > 0 && (
+            <div className="oauth-login" aria-label="Acceso con proveedor externo">
+              <p className="oauth-divider"><span>o continuar con</span></p>
+              <div className="oauth-buttons">
+                {oauthProviders.includes("google") && (
+                  <button type="button" className="oauth-button" onClick={() => startOAuthLogin("google")}>
+                    <span className="oauth-mark oauth-google" aria-hidden="true">G</span>
+                    Google
+                  </button>
+                )}
+                {oauthProviders.includes("microsoft") && (
+                  <button type="button" className="oauth-button" onClick={() => startOAuthLogin("microsoft")}>
+                    <span className="oauth-mark oauth-microsoft" aria-hidden="true">M</span>
+                    Microsoft
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <p className="login-footnote">El acceso y las funciones disponibles dependen de tu perfil.</p>
         </section>
         <aside className="login-aside" aria-label="CIMA">
@@ -1012,6 +1262,26 @@ export default function App() {
           </div>
           <span className="aside-index">GESTIÓN RESIDENCIAL · CHILE</span>
         </aside>
+      </main>
+    );
+  }
+
+  if (user.role === "pending") {
+    return (
+      <main className="approval-layout">
+        <section className="approval-panel" aria-labelledby="approval-title">
+          <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+          <p className="eyebrow">Registro con Google</p>
+          <h1 id="approval-title">Cuenta creada</h1>
+          <p className="login-intro">Hola, {user.displayName || user.username}. Tu registro se completó correctamente.</p>
+          {user.email && <p className="approval-email">{user.email}</p>}
+          <p className="approval-notice">Un administrador debe asignar un perfil antes de habilitar el acceso a la información de CIMA.</p>
+          {approvalError && <p className="error" role="status">{approvalError}</p>}
+          <button className="primary-button" type="button" onClick={() => void handleApprovalRefresh()} disabled={approvalRefreshing}>
+            {approvalRefreshing ? "Comprobando..." : "Comprobar aprobación"}
+          </button>
+          <button className="approval-logout" type="button" onClick={handleLogout}>Cerrar sesión</button>
+        </section>
       </main>
     );
   }
@@ -1036,8 +1306,8 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-user">
-          <span className="user-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
-          <span className="user-summary"><strong>{user.username}</strong><small>{roleLabels[user.role] ?? user.role}</small></span>
+          <span className="user-avatar">{(user.displayName || user.username).slice(0, 1).toUpperCase()}</span>
+          <span className="user-summary"><strong>{user.displayName || user.username}</strong><small>{roleLabels[user.role] ?? user.role}</small></span>
           <button className="logout-button" type="button" onClick={handleLogout} aria-label="Cerrar sesión" title="Cerrar sesión">↪</button>
         </div>
       </aside>
@@ -1053,7 +1323,7 @@ export default function App() {
         {currentView === "dashboard" && hasPermission(user, "dashboard.read") ? (
           <section className="dashboard-content" aria-labelledby="dashboard-title">
             <div className="welcome-row">
-              <div><p className="eyebrow">PANEL DE CONTROL</p><h2 id="dashboard-title">Buenos días, {user.username}</h2><p>Resumen de tu acceso y operación de la residencia.</p></div>
+              <div><p className="eyebrow">PANEL DE CONTROL</p><h2 id="dashboard-title">Buenos días, {user.displayName || user.username}</h2><p>Resumen de tu acceso y operación de la residencia.</p></div>
               <span className="date-stamp">CIMA · CHILE</span>
             </div>
             {dashboardError && <p className="error" role="alert">{dashboardError}</p>}
@@ -1079,6 +1349,60 @@ export default function App() {
               <div className="permission-list">
                 {(user.role === "admin" ? ["Acceso administrativo"] : user.permissions ?? []).map((permission) => <span className="permission-item" key={permission}>{permissionLabel(permission)}</span>)}
               </div>
+            </section>
+          </section>
+        ) : currentView === "users" && hasPermission(user, "user.read") ? (
+          <section className="resident-content" aria-label="Administración de usuarios">
+            <section className="card" aria-labelledby="users-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ACCESO</p><h2 id="users-title">Usuarios del sistema</h2></div>
+                <button type="button" onClick={() => void loadManagedUsers()} disabled={managedUsersLoading}>
+                  {managedUsersLoading ? "Actualizando..." : "Actualizar"}
+                </button>
+              </div>
+              {managedUsersError && <p className="error" role="alert">{managedUsersError}</p>}
+              {managedUsersLoading ? (
+                <p role="status">Cargando usuarios...</p>
+              ) : managedUsers.length === 0 ? (
+                <p>No hay usuarios registrados.</p>
+              ) : (
+                <ul className="resident-list user-management-list">
+                  {managedUsers.map((account) => (
+                    <li key={account.id}>
+                      <div className="user-management-row">
+                        <div className="user-management-summary">
+                          <strong>{account.displayName || account.username}</strong>
+                          {account.email && <span>{account.email}</span>}
+                          <small>{account.username}</small>
+                          <span>{roleLabels[account.role] ?? account.role}</span>
+                        </div>
+                        {hasPermission(user, "user.write") && (
+                          <form className="user-role-form" onSubmit={(event) => void handleManagedUserRoleChange(event, account.id)}>
+                            <label className="visually-hidden" htmlFor={`user-role-${account.id}`}>Rol de {account.username}</label>
+                            <select
+                              id={`user-role-${account.id}`}
+                              value={managedUserRoles[account.id] ?? account.role}
+                              onChange={(event) => setManagedUserRoles((roles) => ({ ...roles, [account.id]: event.target.value }))}
+                              disabled={managedUserSaving === account.id}
+                            >
+                              <option value="pending">Pendiente de aprobación</option>
+                              <option value="manager">Dirección</option>
+                              <option value="nurse">Enfermería</option>
+                              <option value="kitchen">Alimentación</option>
+                              <option value="reception">Recepción</option>
+                              <option value="accounting">Contabilidad</option>
+                              <option value="admin">Administración</option>
+                            </select>
+                            <button type="submit" disabled={managedUserSaving === account.id || managedUserRoles[account.id] === account.role}>
+                              {managedUserSaving === account.id ? "Guardando..." : "Guardar rol"}
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </section>
         ) : currentView === "rooms" && hasPermission(user, "room.read") ? (
@@ -1432,6 +1756,76 @@ export default function App() {
                           </div>
                           {event.schedule && <p>Horario: {event.schedule}</p>}
                           {event.notes && <p>{event.notes}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "food" && (hasPermission(user, "diet.read") || hasPermission(user, "food.update")) ? (
+          <section className="resident-content" aria-label="Alimentación">
+            {hasPermission(user, "food.update") && (
+              <section className="card" aria-labelledby="food-form-title">
+                <h2 id="food-form-title">Plan de alimentación</h2>
+                <form onSubmit={handleDietPlanSubmit}>
+                  <label htmlFor="food-resident">Residente</label>
+                  <select id="food-resident" value={dietPlanResidentId} onChange={(event) => setDietPlanResidentId(event.target.value)} required disabled={dietPlansSaving}>
+                    <option value="">Seleccionar residente</option>
+                    {residents.filter((resident) => resident.status === "active").map((resident) => (
+                      <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                    ))}
+                  </select>
+                  <label htmlFor="food-type">Turno</label>
+                  <select id="food-type" value={dietPlanMealType} onChange={(event) => setDietPlanMealType(event.target.value)} disabled={dietPlansSaving}>
+                    <option value="breakfast">Desayuno</option>
+                    <option value="lunch">Almuerzo</option>
+                    <option value="dinner">Cena</option>
+                    <option value="snack">Colación</option>
+                  </select>
+                  <label htmlFor="food-menu">Menú</label>
+                  <input id="food-menu" value={dietPlanMenu} onChange={(event) => setDietPlanMenu(event.target.value)} required disabled={dietPlansSaving} />
+                  <label htmlFor="food-status">Estado</label>
+                  <select id="food-status" value={dietPlanStatus} onChange={(event) => setDietPlanStatus(event.target.value)} disabled={dietPlansSaving}>
+                    <option value="planned">Planificado</option>
+                    <option value="served">Servido</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="adjusted">Ajustado</option>
+                  </select>
+                  <label htmlFor="food-notes">Observaciones</label>
+                  <textarea id="food-notes" value={dietPlanNotes} onChange={(event) => setDietPlanNotes(event.target.value)} rows={3} disabled={dietPlansSaving} />
+                  {dietPlanError && <p className="error" role="alert">{dietPlanError}</p>}
+                  {dietPlanSuccess && <p className="success" role="status">{dietPlanSuccess}</p>}
+                  <button type="submit" disabled={dietPlansSaving}>{dietPlansSaving ? "Guardando..." : "Guardar dieta"}</button>
+                </form>
+              </section>
+            )}
+
+            <section className="card" aria-labelledby="food-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ALIMENTACIÓN</p><h2 id="food-list-title">Planificación actual</h2></div>
+                <button type="button" onClick={() => void loadDietPlans()} disabled={dietPlansLoading}>{dietPlansLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {dietPlansLoading ? (
+                <p role="status">Cargando alimentación...</p>
+              ) : dietPlans.length === 0 ? (
+                <p>No hay dietas registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {dietPlans.map((plan) => {
+                    const resident = residents.find((item) => item.id === plan.residentId);
+                    return (
+                      <li key={plan.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</strong>
+                              <span>{plan.mealType} · {plan.menu}</span>
+                            </div>
+                            <span className="status room-status-available">{plan.status}</span>
+                          </div>
+                          {plan.notes && <p>{plan.notes}</p>}
                         </div>
                       </li>
                     );
