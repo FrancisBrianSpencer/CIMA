@@ -17,6 +17,12 @@
   --coral: #c76c51;
   --gold: #d6a84c;
   --danger: #a13c35;
+  --field-surface: #fff;
+  --surface-raised: #fff;
+  --surface-soft: #f7faf7;
+  --field-border: #cad6d0;
+  --label-ink: #40524d;
+  --table-stripe: #f5f8f5;
 }
 
 * { box-sizing: border-box; }
@@ -32,9 +38,15 @@ h1, h2 { color: var(--ink); }
 .eyebrow { margin-bottom: 0.55rem; color: var(--forest); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 
 .login-layout { display: grid; min-height: 100vh; grid-template-columns: minmax(390px, 0.9fr) minmax(440px, 1.1fr); background: var(--paper); }
+.login-topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.login-topbar .brand-lockup { color: var(--forest-deep); }
+.theme-toggle { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 0.45rem; padding: 0.45rem 0.65rem; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-raised); color: var(--ink); font-size: 0.78rem; font-weight: 600; }
+.theme-toggle:hover { background: var(--surface-soft); }
+.theme-toggle > span:first-child { font-size: 1.05rem; line-height: 1; }
 .approval-layout { display: grid; min-height: 100vh; place-items: center; padding: 1rem; background: var(--canvas); }
 .approval-panel { width: min(100%, 520px); padding: 2.5rem; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); }
-.approval-panel .brand-lockup { margin-bottom: 2.5rem; color: var(--forest-deep); }
+.approval-panel .login-topbar { margin-bottom: 2.5rem; }
+.approval-panel .brand-lockup { color: var(--forest-deep); }
 .approval-panel h1 { margin-bottom: 0.65rem; font-family: "DM Serif Display", Georgia, serif; font-size: 2.2rem; font-weight: 400; }
 .approval-panel .login-intro { margin-bottom: 0.4rem; }
 .approval-email { color: var(--muted); font-size: 0.9rem; overflow-wrap: anywhere; }
@@ -45,7 +57,7 @@ h1, h2 { color: var(--ink); }
 .login-panel { display: flex; width: min(100%, 460px); flex-direction: column; justify-content: center; justify-self: center; padding: 4rem 3rem; }
 .brand-lockup { display: flex; align-items: center; gap: 0.65rem; color: inherit; font-size: 1.12rem; font-weight: 700; letter-spacing: 0.08em; }
 .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 3px; background: #d7a65d; color: #183d37; font-family: "DM Serif Display", Georgia, serif; font-size: 1.35rem; letter-spacing: 0; }
-.login-panel > .brand-lockup { margin-bottom: 4rem; color: var(--forest-deep); }
+.login-panel > .login-topbar { margin-bottom: 4rem; }
 .login-panel h1 { margin-bottom: 0.65rem; font-family: "DM Serif Display", Georgia, serif; font-size: 2.55rem; font-weight: 400; }
 .login-intro { margin-bottom: 2.25rem; color: var(--muted); }
 .login-form { display: grid; gap: 0.65rem; }
@@ -126,6 +138,34 @@ h1, h2 { color: var(--ink); }
 .tile-arrow { color: var(--coral); font-size: 1.1rem; }
 .permission-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .permission-item { padding: 0.48rem 0.65rem; border: 1px solid #d6e1db; border-radius: 3px; background: #e8efea; color: #38584c; font-size: 0.75rem; }
+.module-summary-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; padding: 0.8rem 0; border-bottom: 1px solid var(--line); }
+.module-summary-strip > div { display: grid; gap: 0.35rem; }
+.module-summary-strip span { color: var(--muted); font-size: 0.78rem; }
+.module-summary-strip strong { color: var(--ink); font-family: "DM Serif Display", Georgia, serif; font-size: 1.45rem; font-weight: 400; overflow-wrap: anywhere; }
+.module-entry-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem 1rem; margin-top: 1.4rem; padding-top: 1.1rem; border-top: 1px solid var(--line); }
+.module-entry-form h3, .module-entry-form .form-hint, .module-entry-form .error, .module-entry-form .success, .module-entry-form button { grid-column: 1 / -1; }
+.module-entry-form h3 { margin: 0; color: var(--ink); font-size: 1rem; }
+.module-entry-form button { justify-self: start; }
+.form-hint { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.warning-note { margin: 0.85rem 0; padding: 0.8rem 0.9rem; border-left: 3px solid var(--gold); background: #f7f4e9; color: #5d5947; font-size: 0.86rem; line-height: 1.5; }
+.table-scroll { width: 100%; overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.82rem; }
+.data-table th, .data-table td { padding: 0.75rem 0.65rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.data-table th { color: var(--muted); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.data-table tbody tr:nth-child(even) { background: var(--table-stripe); }
+.data-table td { color: var(--ink); }
+.status-charge { background: #f7edd5; color: #7d5a14; }
+.status-payment { background: #e1efe5; color: #2b6847; }
+.room-status-partial { background: #dcebf0; color: #315c69; }
+.room-status-occupied { background: #f3e0da; color: #863f31; }
+.document-list-row { width: 100%; }
+.document-summary { display: grid; min-width: 0; flex: 1; gap: 0.25rem; }
+.document-summary strong { overflow-wrap: anywhere; }
+.document-summary span, .document-summary small { color: var(--muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+.document-list-row > button { min-height: 38px; padding: 0.45rem 0.75rem; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-raised); color: var(--ink); font-weight: 600; }
+.audit-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 0.75rem; margin: 1rem 0; }
+.audit-filters > div { display: grid; gap: 0.35rem; }
+.audit-filters > button { min-height: 44px; padding: 0.55rem 0.85rem; border: 0; border-radius: 4px; background: var(--forest); color: #fff; font-weight: 700; }
 .resident-content { padding-top: 1.5rem; }
 .card { margin-top: 1.25rem; padding: 1.35rem; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); }
 .card h2 { margin-bottom: 1rem; font-family: "DM Serif Display", Georgia, serif; font-size: 1.45rem; font-weight: 400; }
@@ -193,7 +233,7 @@ h1, h2 { color: var(--ink); }
 @media (max-width: 680px) {
   .login-layout { grid-template-columns: minmax(0, 1fr); }
   .login-panel { min-height: 100vh; padding: 2rem 1.5rem; }
-  .login-panel > .brand-lockup { margin-bottom: 3.2rem; }
+  .login-panel > .login-topbar { margin-bottom: 3.2rem; }
   .login-aside { display: none; }
   .workspace { display: flex; flex-direction: column; }
   .sidebar { position: relative; height: auto; padding: 0.8rem 0.75rem 0; }
@@ -221,9 +261,105 @@ h1, h2 { color: var(--ink); }
   .resident-actions button { flex: 1; }
   .room-record-heading { align-items: flex-start; flex-direction: column; }
   .room-assign-controls { grid-template-columns: minmax(0, 1fr); }
+  .module-summary-strip { grid-template-columns: minmax(0, 1fr); gap: 0.7rem; }
+  .module-summary-strip > div { grid-template-columns: 1fr auto; align-items: baseline; }
+  .module-summary-strip strong { font-size: 1.1rem; }
+  .module-entry-form, .audit-filters { grid-template-columns: minmax(0, 1fr); }
+  .document-list-row { align-items: stretch; }
+  .document-list-row > button { width: 100%; }
   .profile-fields { grid-template-columns: minmax(0, 1fr); gap: 0.35rem; }
   .profile-fields input { margin-bottom: 0.45rem; }
   .header-user { font-size: 0; }
   .online-dot { width: 9px; height: 9px; }
   .card { padding: 1rem; }
 }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e5ece8;
+  --muted: #a5b4ad;
+  --line: #3a4c46;
+  --paper: #202b28;
+  --canvas: #151d1b;
+  --forest: #28665a;
+  --forest-deep: #101a17;
+  --mint: #283c35;
+  --coral: #e18a6d;
+  --gold: #e0bd71;
+  --danger: #ff9c91;
+  --field-surface: #18221f;
+  --surface-raised: #26332f;
+  --surface-soft: #2d3d37;
+  --field-border: #4a5e55;
+  --label-ink: #c0cec7;
+  --table-stripe: #24312d;
+}
+:root[data-theme="dark"] body,
+:root[data-theme="dark"] .login-layout,
+:root[data-theme="dark"] .approval-layout { background: var(--canvas); color: var(--ink); }
+:root[data-theme="dark"] h1,
+:root[data-theme="dark"] h2,
+:root[data-theme="dark"] h3,
+:root[data-theme="dark"] label { color: var(--ink); }
+:root[data-theme="dark"] .login-panel,
+:root[data-theme="dark"] .approval-panel,
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .metric-panel,
+:root[data-theme="dark"] .module-tile { border-color: var(--line); background: var(--paper); color: var(--ink); }
+:root[data-theme="dark"] .login-topbar .brand-lockup,
+:root[data-theme="dark"] .approval-panel .brand-lockup { color: var(--ink); }
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea { border-color: var(--field-border); background: var(--field-surface); color: var(--ink); color-scheme: dark; }
+:root[data-theme="dark"] input::file-selector-button { border: 1px solid var(--line); background: var(--surface-raised); color: var(--ink); }
+:root[data-theme="dark"] .oauth-button,
+:root[data-theme="dark"] .approval-logout,
+:root[data-theme="dark"] .section-heading button,
+:root[data-theme="dark"] .document-list-row > button,
+:root[data-theme="dark"] .room-occupant button,
+:root[data-theme="dark"] .room-assign-controls button,
+:root[data-theme="dark"] .room-history-toggle,
+:root[data-theme="dark"] .resident-actions button,
+:root[data-theme="dark"] .card form .secondary-action,
+:root[data-theme="dark"] .theme-toggle { border-color: var(--line); background: var(--surface-raised); color: var(--ink); }
+:root[data-theme="dark"] .oauth-button:hover,
+:root[data-theme="dark"] .approval-logout:hover,
+:root[data-theme="dark"] .module-tile:hover,
+:root[data-theme="dark"] .theme-toggle:hover { background: var(--surface-soft); }
+:root[data-theme="dark"] .resident-list li,
+:root[data-theme="dark"] .room-occupant { border-color: var(--line); background: var(--surface-raised); color: var(--ink); }
+:root[data-theme="dark"] .room-occupant,
+:root[data-theme="dark"] .room-history-list { background: var(--surface-soft); }
+:root[data-theme="dark"] .login-intro,
+:root[data-theme="dark"] .welcome-row p:not(.eyebrow),
+:root[data-theme="dark"] .header-user,
+:root[data-theme="dark"] .room-summary span,
+:root[data-theme="dark"] .room-history-list,
+:root[data-theme="dark"] .login-footnote,
+:root[data-theme="dark"] .document-summary span,
+:root[data-theme="dark"] .document-summary small { color: var(--muted); }
+:root[data-theme="dark"] .permission-item { border-color: #426356; background: #2a443a; color: #d1e7d8; }
+:root[data-theme="dark"] .error { background: #402725; }
+:root[data-theme="dark"] .success { background: #243c2c; color: #a9dbb5; }
+:root[data-theme="dark"] .approval-notice { border-left-color: var(--gold); background: #3b3627; color: #e9dcae; }
+:root[data-theme="dark"] .warning-note { border-left-color: var(--gold); background: #3b3627; color: #e9dcae; }
+:root[data-theme="dark"] .status-charge { background: #493d24; color: #f1d28c; }
+:root[data-theme="dark"] .status-payment { background: #294735; color: #a9dbb5; }
+:root[data-theme="dark"] .room-status-partial { background: #263f46; color: #a9d8e2; }
+:root[data-theme="dark"] .room-status-occupied { background: #49302c; color: #f2b4a5; }
+:root[data-theme="dark"] .status:not(.status-charge):not(.status-payment):not(.status-inactive):not(.status-archived):not(.room-status-closed):not(.room-status-maintenance) { background: #294735; color: #a9dbb5; }
+:root[data-theme="dark"] .status-inactive,
+:root[data-theme="dark"] .status-archived,
+:root[data-theme="dark"] .room-status-closed { background: #384540; color: #c0cec7; }
+:root[data-theme="dark"] .room-status-maintenance { background: #493d24; color: #f1d28c; }
+:root[data-theme="dark"] .online-dot { box-shadow: 0 0 0 3px #294735; }
+:root[data-theme="dark"] .metric-panel span,
+:root[data-theme="dark"] .module-tile strong,
+:root[data-theme="dark"] .module-tile small,
+:root[data-theme="dark"] .data-table th,
+:root[data-theme="dark"] .data-table td { color: var(--ink); }
+:root[data-theme="dark"] .module-summary-strip,
+:root[data-theme="dark"] .data-table th,
+:root[data-theme="dark"] .data-table td,
+:root[data-theme="dark"] .module-placeholder { border-color: var(--line); }
+:root[data-theme="dark"] .module-summary-strip span { color: var(--muted); }

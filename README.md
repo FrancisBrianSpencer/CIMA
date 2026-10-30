@@ -8,9 +8,9 @@ Centraliza residentes, habitaciones, alimentación, indicaciones médicas, medic
 
 > **Proyecto independiente:** CIMA no está asociado, afiliado ni desarrollado para terceros que utilicen nombres comerciales similares.
 
-## Estado del proyecto — versión técnica actualizada v0.7
+## Estado del proyecto — versión técnica actualizada v1.0
 
-La especificación técnica actual está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md). En ella se reflejan los avances verificados: residentes, habitaciones, estadías, atención clínica, medicamentos, alimentación y autenticación OAuth2 para Google y Microsoft. La autenticación federada requiere registrar credenciales en los proveedores y guardarlas únicamente en `.env`.
+La especificación técnica actual está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md). En ella se reflejan los avances verificados: operación residencial, OAuth2, cuotas, borradores no fiscales, pagos simulados locales, conciliación CSV, documentos privados con ClamAV, auditoría y tema claro/oscuro. No se conectan bancos ni pasarelas reales.
 
 La última release/tag publicada sigue siendo v0.3, pero el estado real del proyecto está descrito en el documento v0.6 y no corresponde a un release formal todavía. El entorno requiere únicamente Docker Desktop y Git; no es necesario instalar Go, Node.js ni MongoDB en el equipo.
 
@@ -21,6 +21,9 @@ La última release/tag publicada sigue siendo v0.3, pero el estado real del proy
 - MongoDB
 - Docker + Docker Compose
 - JWT HS256, refresh token y bcrypt implementados; RBAC backend por permiso
+- Libro de cargos/pagos en CLP, documentos privados en MongoDB y auditoría de mutaciones API
+- Tema claro/oscuro con preferencia persistente por navegador
+- Análisis ClamAV privado para documentos y límites HTTP por IP/cuerpo
 - Vitest, pruebas Go e integración API/MongoDB implementadas; pruebas E2E pendientes
 - Interfaz y mensajes en español, UTF-8 y locale `es-CL`
 - GitHub Actions
@@ -64,7 +67,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-La primera ejecución puede tardar porque Docker descarga las imágenes base y construye los contenedores.
+La primera ejecución puede tardar porque Docker descarga las imágenes base, construye los contenedores y ClamAV descarga sus firmas. El backend espera que el escáner esté saludable antes de iniciar; si el escáner no está disponible, las cargas de documentos se rechazan.
 
 ### Servicios
 
@@ -99,6 +102,8 @@ Windows
        │    └── Node.js
        ├── backend
        │    └── Go
+       ├── clamav
+       │    └── análisis de documentos
        └── mongodb
             └── MongoDB
 ```
@@ -110,6 +115,7 @@ docker compose ps
 docker compose logs -f
 docker compose logs -f backend
 docker compose logs -f frontend
+docker compose logs -f clamav
 docker compose build --no-cache
 docker compose --profile integration run --rm integration-tests
 ```
@@ -132,6 +138,7 @@ OAUTH_MICROSOFT_TENANT_ID=common
 OAUTH_MICROSOFT_REDIRECT_URI=http://localhost:8080/auth/oauth/microsoft/callback
 OAUTH_FRONTEND_REDIRECT_URI=http://localhost:5173/
 OAUTH_ALLOWED_DOMAINS=
+PAYMENT_MODE=mock
 ```
 
 **Nunca subas `.env` al repositorio.** En producción, usa un gestor de secretos y un `JWT_SECRET` fuerte y aleatorio.

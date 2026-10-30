@@ -54,7 +54,7 @@ type Room struct {
 	Code              string                `json:"code" bson:"code"`
 	Capacity          int                   `json:"capacity" bson:"capacity"`
 	Status            string                `json:"status" bson:"status"`
-	OccupantIDs       []primitive.ObjectID  `json:"occupantIds" bson:"occupantIds"`
+	OccupantIDs       []primitive.ObjectID  `json:"occupantIds" bson:"occupantIds,omitempty"`
 	Occupancy         int                   `json:"occupancy" bson:"-"`
 	AssignmentHistory []RoomAssignmentEvent `json:"-" bson:"assignmentHistory,omitempty"`
 	CreatedAt         *time.Time            `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
@@ -349,6 +349,10 @@ func main() {
 	port := getenv("APP_PORT", "8080")
 	mongoURI := getenv("MONGO_URI", "mongodb://mongodb:27017")
 	dbName := getenv("MONGO_DATABASE", "cima")
+	paymentMode := strings.ToLower(strings.TrimSpace(getenv("PAYMENT_MODE", "mock")))
+	if paymentMode != "mock" {
+		log.Fatal("PAYMENT_MODE must be mock; real payment providers are not enabled in this experimental build.")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -373,16 +377,7 @@ func main() {
 	}); err != nil {
 		log.Fatalf("create room code index: %v", err)
 	}
-	if _, err := roomCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "occupantIds", Value: 1}},
-		Options: options.Index().SetUnique(true).SetSparse(true),
-	}); err != nil {
-		log.Fatalf("create unique room occupant index: %v", err)
-	}
-	if _, err := roomCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "occupantIds", Value: 1}},
-		Options: options.Index().SetUnique(true).SetSparse(true),
-	}); err != nil {
+	if err := ensureRoomOccupantIndex(ctx, roomCollection); err != nil {
 		log.Fatalf("create unique room occupant index: %v", err)
 	}
 	stayCollection := client.Database(dbName).Collection("stays")
@@ -434,6 +429,53 @@ func main() {
 	}); err != nil {
 		log.Fatalf("create diet plan status index: %v", err)
 	}
+	billingCollection := client.Database(dbName).Collection("billing_entries")
+	if _, err := billingCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create billing resident index: %v", err)
+	}
+	if _, err := billingCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "providerReference", Value: 1}},
+		Options: options.Index().SetUnique(true).SetSparse(true),
+	}); err != nil {
+		log.Fatalf("create billing provider reference index: %v", err)
+	}
+	installmentPlanCollection := client.Database(dbName).Collection("installment_plans")
+	if _, err := installmentPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create installment plan resident index: %v", err)
+	}
+	taxDraftCollection := client.Database(dbName).Collection("tax_document_drafts")
+	if _, err := taxDraftCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create tax draft resident index: %v", err)
+	}
+	reconciliationCollection := client.Database(dbName).Collection("reconciliation_batches")
+	if _, err := reconciliationCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create reconciliation batch date index: %v", err)
+	}
+	documentCollection := client.Database(dbName).Collection("private_documents")
+	if _, err := documentCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create private document resident index: %v", err)
+	}
+	auditCollection := client.Database(dbName).Collection("audit_events")
+	if _, err := auditCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create audit event date index: %v", err)
+	}
+	if _, err := auditCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "actor", Value: 1}, {Key: "resource", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create audit event actor/resource index: %v", err)
+	}
 	// userCollection guarda usuarios, roles y permisos para la autenticación del sistema.
 	userCollection := client.Database(dbName).Collection("users")
 	oauthIdentityCollection := client.Database(dbName).Collection("user_oauth_identities")
@@ -481,13 +523,17 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Use(corsMiddleware(getenv("CORS_ORIGIN", "http://localhost:5173")))
+	r.Use(secureHeadersMiddleware)
+	r.Use(requestBodyLimitMiddleware(13 << 20))
+	r.Use(auditSuccessfulMutations(auditCollection))
+	r.Use(newRequestRateLimiter(240, time.Minute).Middleware)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	r.Route("/auth", func(r chi.Router) {
-		r.Post("/login", func(w http.ResponseWriter, req *http.Request) {
+		r.With(newRequestRateLimiter(20, 15*time.Minute).Middleware).Post("/login", func(w http.ResponseWriter, req *http.Request) {
 			var input AuthLoginRequest
 			if !decodeStrictJSON(w, req, &input) {
 				return
@@ -800,29 +846,7 @@ func main() {
 		})
 	})
 
-	r.Route("/api/v1/audit", func(r chi.Router) {
-		r.With(requirePermission("audit.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de auditoría disponible"})
-		})
-	})
-
-	r.Route("/api/v1/documents", func(r chi.Router) {
-		r.With(requirePermission("document.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de documentos disponible"})
-		})
-		r.With(requirePermission("document.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de documentos aún no está implementado."})
-		})
-	})
-
-	r.Route("/api/v1/billing", func(r chi.Router) {
-		r.With(requirePermission("billing.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de facturación disponible"})
-		})
-		r.With(requirePermission("billing.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de facturación aún no está implementado."})
-		})
-	})
+	registerModuleRoutes(r, collection, billingCollection, documentCollection, auditCollection, installmentPlanCollection, taxDraftCollection, reconciliationCollection, getenv("CLAMAV_ADDRESS", "clamav:3310"), paymentMode)
 
 	r.Route("/api/v1/diet-plans", func(r chi.Router) {
 		r.With(requirePermission("diet.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
@@ -1095,13 +1119,17 @@ func main() {
 			now := time.Now().UTC()
 			room.CreatedAt = &now
 			room.UpdatedAt = &now
-			room.OccupantIDs = []primitive.ObjectID{}
+			room.OccupantIDs = nil
 
 			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 			defer cancel()
 			result, err := roomCollection.InsertOne(ctx, room)
-			if mongo.IsDuplicateKeyError(err) {
+			if isDuplicateKeyForIndex(err, "code_1") {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "Ya existe una habitación con ese código."})
+				return
+			}
+			if isDuplicateKeyForIndex(err, "occupantIds_1") {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "Un residente ya está asignado a otra habitación."})
 				return
 			}
 			if err != nil {
@@ -1175,7 +1203,7 @@ func main() {
 				bson.M{"$set": updates},
 				options.FindOneAndUpdate().SetReturnDocument(options.After),
 			).Decode(&room)
-			if mongo.IsDuplicateKeyError(err) {
+			if isDuplicateKeyForIndex(err, "code_1") {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "Ya existe una habitación con ese código."})
 				return
 			}
@@ -1872,7 +1900,47 @@ func roomOccupancyExpression() bson.M {
 
 // setRoomOccupancy prepara el conteo público sin exponer los identificadores de residentes.
 func setRoomOccupancy(room *Room) {
+	if room.OccupantIDs == nil {
+		room.OccupantIDs = []primitive.ObjectID{}
+	}
 	room.Occupancy = len(room.OccupantIDs)
+}
+
+// ensureRoomOccupantIndex migrates the legacy sparse index to a partial unique index over actual resident IDs.
+func ensureRoomOccupantIndex(ctx context.Context, rooms *mongo.Collection) error {
+	cursor, err := rooms.Indexes().List(ctx)
+	if err != nil {
+		return err
+	}
+	var indexes []bson.M
+	if err := cursor.All(ctx, &indexes); err != nil {
+		_ = cursor.Close(ctx)
+		return err
+	}
+	_ = cursor.Close(ctx)
+	for _, index := range indexes {
+		name, _ := index["name"].(string)
+		if name == "occupantIds_1" {
+			if _, hasPartialFilter := index["partialFilterExpression"]; !hasPartialFilter {
+				if _, err := rooms.Indexes().DropOne(ctx, name); err != nil {
+					return err
+				}
+			}
+			break
+		}
+	}
+	_, err = rooms.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "occupantIds", Value: 1}},
+		Options: options.Index().SetUnique(true).SetPartialFilterExpression(
+			bson.M{"occupantIds": bson.M{"$type": "objectId"}},
+		),
+	})
+	return err
+}
+
+// isDuplicateKeyForIndex checks the Mongo index name before assigning a user-facing conflict message.
+func isDuplicateKeyForIndex(err error, indexName string) bool {
+	return mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "index: "+indexName+" ")
 }
 
 // decodeStrictJSON asegura que el cuerpo venga como un único objeto JSON y que no haya campos desconocidos.

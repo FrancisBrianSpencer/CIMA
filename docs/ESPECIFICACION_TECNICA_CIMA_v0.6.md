@@ -2,15 +2,15 @@
 title: "CIMA"
 subtitle: "Control Interno y Monitoreo de Adultos Mayores"
 author: "Especificación técnica"
-date: "30 de septiembre de 2026"
+date: "30 de octubre de 2026"
 lang: es-CL
 ---
 
 # Especificación técnica
 
-**Versión del documento:** 0.7
-**Fecha de corte:** 30 de septiembre de 2026  
-**Estado:** backend y frontend con residentes, habitaciones, estancias, atención clínica, medicación y alimentación; OAuth2 base para Google y Microsoft implementado. Facturación, documentos y auditoría funcional siguen pendientes.
+**Versión del documento:** 1.0
+**Fecha de corte:** 30 de octubre de 2026
+**Estado:** facturación experimental ampliada con cuotas, borradores no fiscales, pagos mock y conciliación CSV local.
 
 ## Historial
 
@@ -19,6 +19,9 @@ lang: es-CL
 - **0.5:** login JWT, renovación de sesión, usuarios/roles, RBAC por endpoint, dashboard inicial, habitaciones, historial de asignación y validación de módulos pendientes.
 - **0.6:** estancias, notas clínicas y eventos de medicación implementados; actualización del estado real del proyecto y definición de arquitectura OAuth2 para Microsoft/Outlook y Google.
 - **0.7:** OAuth2 Google/Microsoft con `state`, PKCE S256, registro en rol pendiente, intercambio de código efímero por JWT local y configuración Docker por entorno.
+- **0.8:** libro de cargos/pagos en CLP, documentos privados en MongoDB, auditoría de mutaciones exitosas y preferencia de tema claro/oscuro persistente.
+- **0.9:** ClamAV privado en Docker con bloqueo de cargas ante infección/falla; límite de cuerpo, rate limits por IP y cabeceras HTTP de seguridad.
+- **1.0:** calendario de cuotas CLP, borradores administrativos no fiscales, pagos exclusivamente simulados e importación/conciliación CSV sin conservar cartolas.
 
 ## 1. Propósito
 
@@ -35,6 +38,8 @@ API Go + Chi
         +--> JWT/RBAC local
         +--> OAuth2 providers (Microsoft/Google)
         |
+    +--> ClamAV INSTREAM (solo cargas documentales; obligatorio antes de guardar)
+    |
         v
 MongoDB
 ```
@@ -52,17 +57,20 @@ MongoDB
 | Medicación | Eventos de administración con colección, validación y formulario UI. | Falta historial completo, marcación por residente y acciones de administración. |
 | Dashboard | Vista base con módulos y métricas simples. | No es todavía un dashboard operativo completo. |
 | Alimentación | Planes por residente y turno con API, permisos y UI. | Ampliar con restricciones, alergias y dietas clínicas estructuradas. |
-| Facturación | Rutas placeholder. | Requiere diseño de cargos, pagos y cuotas. |
-| Documentos | Rutas placeholder. | Requiere almacenamiento seguro y permisos por documento. |
-| Auditoría | GET protegido y trazabilidad parcial. | Necesita registro de acciones sensibles y minimización de datos. |
+| Facturación | Libro interno, calendario de cuotas, borradores no fiscales, pago mock idempotente y conciliación CSV. | Sin DTE válido, cobro real ni API bancaria; las cuotas se suman al saldo como total planificado. |
+| Documentos | Archivos privados por residente; formato, tamaño y ClamAV validados antes de guardar. | MongoDB, 8 MiB máximo; faltan retención y permisos por categoría. |
+| Auditoría | Eventos de mutaciones API exitosas con actor, acción, recurso, resultado y fecha. | No almacena cuerpos; login/logout y lecturas aún no se registran. |
+| Apariencia | Modo claro/oscuro en login, aprobación OAuth y sistema; preferencia local persistente. | Preferencia por navegador, no sincronizada entre dispositivos. |
 | OAuth2 | Inicio/callback, perfiles Google/Microsoft, colección de identidades y canje de sesión implementados. | Credenciales externas requieren configuración; enlace federado a cuentas locales existentes queda pendiente. |
 
 ## 3. Stack y ejecución
 
 - **API:** Go 1.23, Chi, MongoDB Go Driver, JWT HS256, bcrypt y OAuth2 Google/Microsoft.
 - **Frontend:** React 18 + TypeScript + Vite.
-- **Datos:** MongoDB 7. Colecciones activas: `residents`, `users`, `rooms`, `stays`, `clinical_notes`, `medication_events`, `diet_plans`, `user_oauth_identities`, `oauth_flows` y `oauth_login_codes`.
+- **Datos:** MongoDB 7. Colecciones activas: `residents`, `users`, `rooms`, `stays`, `clinical_notes`, `medication_events`, `diet_plans`, `billing_entries`, `private_documents`, `audit_events` y colecciones OAuth.
 - **Ejecución:** Docker Compose en modo Docker-first.
+- **Análisis de archivos:** servicio `clamav/clamav:1.4` en red privada Compose, firmas persistidas en `cima-clamav-data`; no se publica su puerto al host.
+- **Pagos de prueba:** `PAYMENT_MODE=mock` es el único modo aceptado; no hay SDK, credenciales ni tráfico a Transbank u otra pasarela.
 - **Servicios locales:**
   - Frontend: `http://localhost:5173`
   - API: `http://localhost:8080`
@@ -103,6 +111,10 @@ Reglas vigentes:
 - Contraseña: bcrypt.
 - RBAC: permisos por ruta y middleware backend.
 - Frontend: almacena tokens en sessionStorage y trata 401 como renovación o cierre de sesión.
+- API: límite general de 240 solicitudes/minuto por dirección remota; login, 20 intentos cada 15 minutos; carga documental, 12/minuto. Los límites no confían en `X-Forwarded-For`.
+- API: cuerpo máximo global 13 MiB, `nosniff`, bloqueo de framing, política CSP para respuestas API y HSTS cuando `APP_ENV=production`.
+- Documentos: máximo 8 MiB después de decodificar, tipo detectado en servidor y análisis ClamAV `INSTREAM` antes de `InsertOne`. Infección devuelve 422; escáner caído/no disponible devuelve 503 y no guarda el archivo.
+- Apariencia: guarda `light`/`dark` en `localStorage` por navegador y respeta inicialmente `prefers-color-scheme`.
 - OAuth2: `state` aleatorio con hash almacenado, cookie `HttpOnly`/`SameSite=Lax` para correlación, PKCE S256, secretos solo en backend y código de sesión de un solo uso vinculado al navegador.
 - Registro federado: se crea un usuario `pending` y se inicia sesión automáticamente, pero no obtiene permisos ni acceso a datos hasta que un administrador le asigne un rol.
 - La administración de usuarios permite revisar nombre/correo del proveedor y asignar un rol aprobado.
@@ -171,10 +183,23 @@ La UI oculta módulos según permisos, pero el backend sigue siendo la fuente de
 | `POST /api/v1/medication-events/` | `medication.write` | Implementado. |
 | `GET /api/v1/diet-plans/` | `diet.read` | Implementado. |
 | `POST /api/v1/diet-plans/` | `food.update` | Implementado. |
+| `GET /api/v1/billing/?residentId={id}` | `billing.read` | Lista el libro interno. |
+| `GET /api/v1/billing/summary?residentId={id}` | `billing.read` | Calcula cargos, pagos y saldo CLP. |
+| `POST /api/v1/billing/charges` | `billing.write` | Registra un cargo. |
+| `POST /api/v1/billing/payments` | `billing.write` | Registra un abono, incluidos créditos a favor. |
+| `GET /api/v1/billing/installment-plans?residentId={id}` | `billing.read` | Lista planes y calendario CLP. |
+| `POST /api/v1/billing/installment-plans` | `billing.write` | Crea plan local de 2 a 36 cuotas. |
+| `GET /api/v1/billing/tax-document-drafts` | `billing.read` | Lista borradores sin validez tributaria. |
+| `POST /api/v1/billing/tax-document-drafts` | `billing.write` | Crea borrador interno boleta/factura; no es DTE. |
+| `POST /api/v1/billing/mock-payments` | `billing.write` | Inserta un pago local simulado con clave idempotente. |
+| `POST /api/v1/billing/reconciliation/import` | `billing.write` | Compara CSV `date,amount_clp,reference,description` con pagos existentes. |
+| `GET /api/v1/billing/reconciliation/batches` | `billing.read` | Lista resultados; no conserva el archivo original. |
+| `GET /api/v1/documents/?residentId={id}` | `document.read` | Lista metadatos sin contenido. |
+| `POST /api/v1/documents/` | `document.write` | Carga PDF, PNG, JPEG o texto hasta 8 MiB. |
+| `GET /api/v1/documents/{id}/download` | `document.read` | Descarga autenticada del archivo. |
+| `GET /api/v1/audit/?actor={user}&resource={name}` | `audit.read` | Consulta eventos recientes filtrables. |
+| Middleware `/api/v1/*` | Token válido | Registra mutaciones exitosas sin guardar request bodies. |
 | `GET /api/v1/dashboard/` | `dashboard.read` | Base implementada. |
-| `GET /api/v1/audit/` | `audit.read` | Base protegida. |
-| `GET /api/v1/billing/` | `billing.read` | Placeholder. |
-| `GET /api/v1/documents/` | `document.read` | Placeholder. |
 
 ## 7. Modelos clave implementados
 
@@ -250,14 +275,25 @@ type MedicationEvent struct {
 - Build de producción exitoso con Vite.
 - Validación de permisos, interacción con API y carga/error/éxito.
 
+### Seguridad web y archivos
+
+- `decodeStrictJSON` rechaza propiedades desconocidas; filtros Mongo se construyen con campos fijos y los identificadores se convierten a `ObjectID`, no se aceptan operadores BSON del cliente.
+- Los límites por IP reducen abuso de capa de aplicación; no detienen DDoS volumétrico ni sustituyen WAF/CDN/protección del proveedor de hosting.
+- HSTS requiere que producción esté publicada detrás de HTTPS. La aplicación no instala ni configura terminación TLS.
+- El rate limiting por IP es una protección de aplicación. DDoS volumétrico requiere filtrado perimetral del hosting, CDN o WAF, fuera de este Compose local.
+- ClamAV actualiza firmas en su contenedor y el backend depende de que pase el healthcheck antes de iniciar. Si el daemon deja de responder, se rechaza la carga de documentos.
+- La prueba Docker de integración comprueba una muestra limpia y el test EICAR; no introduce archivos en MongoDB.
+
 ## 9. Qué falta por completar
 
-1. Facturación, pagos, cargos y estados de cuenta.
-2. Documentación privada y almacenamiento seguro.
-3. Auditoría real y trazabilidad de cambios sensibles.
-4. Enlace/desvinculación de proveedores a cuentas locales existentes.
-5. Verificación real de login OAuth con credenciales registradas en Google y Entra ID.
-6. Hardening antes de producción: HTTPS, rate limiting, monitoring, backups y gestión centralizada de secretos.
+1. Integración certificada con proveedor DTE/SII, folios y firma; los borradores actuales se marcan sin validez tributaria.
+2. Elegir y configurar una pasarela comercial; el endpoint actual solo simula aprobaciones localmente.
+3. API de banca abierta/archivos bancarios por institución; CSV actual solo concilia con movimientos internos existentes.
+4. Asignación de pagos a cuotas y estados de vencimiento/cobranza.
+5. Reglas de retención y autorización por categoría/residente para documentos.
+6. Auditoría de login/logout, lecturas sensibles y alertas; ahora se registran mutaciones exitosas.
+7. Enlace/desvinculación de proveedores a cuentas locales existentes.
+8. Hardening perimetral/de producción: HTTPS y terminación TLS, WAF/CDN para DDoS volumétrico, monitoreo, backups, gestión centralizada de secretos y configuración de proxies confiables.
 
 ## 10. Integración OAuth2 implementada
 
@@ -420,4 +456,4 @@ Se considera cerrado cuando:
 
 ## 13. Conclusión
 
-CIMA cuenta con autenticación local y la base de autenticación federada Google/Microsoft integrada con JWT y RBAC. El siguiente bloque funcional es facturación, seguido de documentos y auditoría. La validación interactiva OAuth queda pendiente de registrar credenciales en cada proveedor y mantenerlas en `.env` o en un gestor de secretos.
+CIMA incorpora un libro interno de cargos/pagos, calendario de cuotas, borradores no fiscales, pagos simulados locales y conciliación CSV, además de documentos analizados y auditoría de mutaciones. Esta versión experimental no emite DTE, no procesa dinero real ni conecta bancos.

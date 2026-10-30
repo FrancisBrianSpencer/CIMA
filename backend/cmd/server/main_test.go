@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -419,6 +420,135 @@ func TestOAuthCookieSecurityAttributes(t *testing.T) {
 	cookie := cookies[0]
 	if cookie.Name != "cima_oauth_exchange" || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/auth/oauth/" {
 		t.Fatalf("OAuth cookie attributes = %+v, want HttpOnly, Secure, SameSite=Lax, and OAuth path", cookie)
+	}
+}
+
+func TestValidateBillingEntryCreate(t *testing.T) {
+	residentID := primitive.NewObjectID().Hex()
+	charge, message := validateBillingEntryCreate(BillingEntryCreate{
+		ResidentID:  residentID,
+		Description: "  Mensualidad septiembre  ",
+		AmountCLP:   450000,
+		DueDate:     "2026-10-10",
+	}, "charge")
+	if message != "" {
+		t.Fatalf("validateBillingEntryCreate(charge) error = %q", message)
+	}
+	if charge.Description != "Mensualidad septiembre" || charge.Kind != "charge" || charge.AmountCLP != 450000 || charge.DueDate == nil {
+		t.Fatalf("charge = %+v, want normalized charge with due date", charge)
+	}
+
+	payment, message := validateBillingEntryCreate(BillingEntryCreate{
+		ResidentID:    residentID,
+		Description:   "Abono transferencia",
+		AmountCLP:     100000,
+		PaymentMethod: " Transferencia ",
+	}, "payment")
+	if message != "" || payment.PaymentMethod != "transferencia" {
+		t.Fatalf("validateBillingEntryCreate(payment) = (%+v, %q), want normalized payment", payment, message)
+	}
+
+	_, message = validateBillingEntryCreate(BillingEntryCreate{ResidentID: residentID, Description: "Cargo", AmountCLP: -1}, "charge")
+	if message == "" {
+		t.Fatal("validateBillingEntryCreate() accepted a negative amount")
+	}
+	_, message = validateBillingEntryCreate(BillingEntryCreate{ResidentID: residentID, Description: "Pago", AmountCLP: 1}, "payment")
+	if message == "" {
+		t.Fatal("validateBillingEntryCreate() accepted a payment without method")
+	}
+}
+
+func TestValidateInstallmentPlanCreate(t *testing.T) {
+	plan, message := validateInstallmentPlanCreate(InstallmentPlanCreate{
+		ResidentID:       primitive.NewObjectID().Hex(),
+		Description:      "Cuotas de estadía",
+		TotalAmountCLP:   1000,
+		InstallmentCount: 3,
+		FirstDueDate:     "2026-01-31",
+	})
+	if message != "" {
+		t.Fatalf("validateInstallmentPlanCreate() error = %q", message)
+	}
+	if len(plan.Installments) != 3 || plan.Installments[0].AmountCLP != 333 || plan.Installments[1].AmountCLP != 333 || plan.Installments[2].AmountCLP != 334 {
+		t.Fatalf("installments = %+v, want 333, 333, 334 CLP", plan.Installments)
+	}
+	if plan.Installments[1].DueDate.Format("2006-01-02") != "2026-02-28" {
+		t.Fatalf("second due date = %s, want month-end clamp", plan.Installments[1].DueDate.Format("2006-01-02"))
+	}
+
+	_, message = validateInstallmentPlanCreate(InstallmentPlanCreate{
+		ResidentID:       primitive.NewObjectID().Hex(),
+		Description:      "Cuotas",
+		TotalAmountCLP:   100,
+		InstallmentCount: 101,
+		FirstDueDate:     "2026-01-01",
+	})
+	if message == "" {
+		t.Fatal("validateInstallmentPlanCreate() accepted more installments than whole pesos")
+	}
+}
+
+func TestValidateTaxDocumentDraftCreate(t *testing.T) {
+	draft, message := validateTaxDocumentDraftCreate(TaxDocumentDraftCreate{
+		ResidentID:   primitive.NewObjectID().Hex(),
+		DocumentType: " Boleta ",
+		Description:  "Cargo de prueba",
+		AmountCLP:    12500,
+	})
+	if message != "" {
+		t.Fatalf("validateTaxDocumentDraftCreate() error = %q", message)
+	}
+	if draft.Status != "draft" || draft.FiscalValidity != "not_valid_for_tax_use" || draft.DocumentType != "boleta" {
+		t.Fatalf("draft = %+v, want explicitly non-fiscal draft", draft)
+	}
+}
+
+func TestParseReconciliationCSVValidatesHeader(t *testing.T) {
+	if _, err := parseReconciliationCSVRows(strings.NewReader("date,amount_clp,reference,description\n2026-10-01,5000,BANK-1,Pago\n")); err != nil {
+		t.Fatalf("parseReconciliationCSVRows() unexpected error: %v", err)
+	}
+	if _, err := parseReconciliationCSVRows(strings.NewReader("account,date,amount\n")); err == nil {
+		t.Fatal("parseReconciliationCSVRows() accepted an unsupported header")
+	}
+}
+
+func TestMockPaymentReferenceIsIdempotent(t *testing.T) {
+	first := mockPaymentReference("same-request")
+	if first != mockPaymentReference("same-request") {
+		t.Fatal("mockPaymentReference() changed for the same key")
+	}
+	if first == mockPaymentReference("different-request") {
+		t.Fatal("mockPaymentReference() collided for different keys")
+	}
+}
+
+func TestValidatePrivateDocumentCreate(t *testing.T) {
+	pngContent := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/2ioAAAAASUVORK5CYII="
+	document, message := validatePrivateDocumentCreate(PrivateDocumentCreate{
+		ResidentID:    primitive.NewObjectID().Hex(),
+		FileName:      "../identidad.png",
+		Title:         "Documento de identidad",
+		Category:      " Identity ",
+		ContentType:   "image/png",
+		ContentBase64: pngContent,
+	})
+	if message != "" {
+		t.Fatalf("validatePrivateDocumentCreate() error = %q", message)
+	}
+	if document.FileName != "identidad.png" || document.Category != "identity" || len(document.Content) == 0 {
+		t.Fatalf("document = %+v, want normalized private document", document)
+	}
+
+	_, message = validatePrivateDocumentCreate(PrivateDocumentCreate{
+		ResidentID:    primitive.NewObjectID().Hex(),
+		FileName:      "script.exe",
+		Title:         "Archivo",
+		Category:      "other",
+		ContentType:   "application/octet-stream",
+		ContentBase64: base64.StdEncoding.EncodeToString([]byte("MZ executable")),
+	})
+	if message == "" {
+		t.Fatal("validatePrivateDocumentCreate() accepted an executable document")
 	}
 }
 

@@ -50,6 +50,20 @@ type Room = {
   occupantIds?: string[];
 };
 
+type RoomDisplayStatus = {
+  label: string;
+  kind: "available" | "partial" | "occupied" | "maintenance" | "closed";
+};
+
+// roomDisplayStatus comunica la disponibilidad real sin perder el estado operativo de la habitación.
+function roomDisplayStatus(room: Room): RoomDisplayStatus {
+  if (room.status === "maintenance") return { label: "En mantención", kind: "maintenance" };
+  if (room.status === "closed") return { label: "Cerrada", kind: "closed" };
+  if (room.occupancy >= room.capacity) return { label: "Ocupada", kind: "occupied" };
+  if (room.occupancy > 0) return { label: "Parcialmente ocupada", kind: "partial" };
+  return { label: "Disponible", kind: "available" };
+}
+
 type RoomAssignmentEvent = {
   residentId: string;
   action: "assigned" | "released";
@@ -103,6 +117,96 @@ type DietPlan = {
   createdBy?: string;
   createdAt?: string;
 };
+
+type BillingEntry = {
+  id: string;
+  residentId: string;
+  kind: "charge" | "payment";
+  description: string;
+  amountClp: number;
+  dueDate?: string;
+  paymentMethod?: string;
+  reference?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+type BillingSummary = {
+  residentId: string;
+  chargesClp: number;
+  paymentsClp: number;
+  balanceClp: number;
+};
+
+type InstallmentPlan = {
+  id: string;
+  residentId: string;
+  description: string;
+  totalAmountClp: number;
+  installmentCount: number;
+  installments: { number: number; amountClp: number; dueDate: string }[];
+  createdBy: string;
+  createdAt: string;
+};
+
+type TaxDocumentDraft = {
+  id: string;
+  residentId: string;
+  documentType: "boleta" | "factura";
+  description: string;
+  amountClp: number;
+  status: string;
+  fiscalValidity: string;
+  createdAt: string;
+};
+
+type ReconciliationBatch = {
+  id: string;
+  createdAt: string;
+  importedBy: string;
+  rows: { line: number; date: string; amountClp: number; reference: string; status: string }[];
+};
+
+type PrivateDocument = {
+  id: string;
+  residentId: string;
+  fileName: string;
+  title: string;
+  category: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  createdAt: string;
+};
+
+type AuditEvent = {
+  id: string;
+  actor: string;
+  action: string;
+  resource: string;
+  resourceId?: string;
+  statusCode: number;
+  createdAt: string;
+};
+
+type ThemeMode = "light" | "dark";
+
+// ThemeToggle cambia el tema visual sin alterar los datos ni la sesión de la cuenta.
+function ThemeToggle({ theme, onToggle }: { theme: ThemeMode; onToggle: () => void }) {
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+      aria-pressed={theme === "dark"}
+      title={theme === "dark" ? "Modo oscuro activado" : "Modo claro activado"}
+    >
+      <span aria-hidden="true">{theme === "dark" ? "☼" : "◐"}</span>
+      <span>{theme === "dark" ? "Claro" : "Oscuro"}</span>
+    </button>
+  );
+}
 
 type Contact = {
   name: string;
@@ -186,6 +290,11 @@ function userFacingError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+// formatCLP presenta montos como pesos chilenos enteros para evitar ambigüedad de decimales.
+function formatCLP(amount: number) {
+  return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(amount);
+}
+
 // profileForDisplay mantiene la fecha de nacimiento en formato chileno dentro de la interfaz.
 function profileForDisplay(data: Partial<ResidentProfile>): ResidentProfile {
   return {
@@ -198,6 +307,11 @@ function profileForDisplay(data: Partial<ResidentProfile>): ResidentProfile {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const storedTheme = localStorage.getItem("cima.theme");
+    if (storedTheme === "light" || storedTheme === "dark") return storedTheme;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [loginUsername, setLoginUsername] = useState("");
@@ -212,6 +326,61 @@ export default function App() {
   const [managedUsersLoading, setManagedUsersLoading] = useState(false);
   const [managedUsersError, setManagedUsersError] = useState("");
   const [managedUserSaving, setManagedUserSaving] = useState("");
+  const [billingEntries, setBillingEntries] = useState<BillingEntry[]>([]);
+  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+  const [billingResidentId, setBillingResidentId] = useState("");
+  const [billingKind, setBillingKind] = useState<"charge" | "payment">("charge");
+  const [billingDescription, setBillingDescription] = useState("");
+  const [billingAmount, setBillingAmount] = useState("");
+  const [billingDueDate, setBillingDueDate] = useState("");
+  const [billingPaymentMethod, setBillingPaymentMethod] = useState("transferencia");
+  const [billingReference, setBillingReference] = useState("");
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [billingSuccess, setBillingSuccess] = useState("");
+  const [installmentPlans, setInstallmentPlans] = useState<InstallmentPlan[]>([]);
+  const [installmentDescription, setInstallmentDescription] = useState("");
+  const [installmentTotal, setInstallmentTotal] = useState("");
+  const [installmentCount, setInstallmentCount] = useState("3");
+  const [installmentFirstDueDate, setInstallmentFirstDueDate] = useState("");
+  const [installmentSaving, setInstallmentSaving] = useState(false);
+  const [installmentLoading, setInstallmentLoading] = useState(false);
+  const [installmentError, setInstallmentError] = useState("");
+  const [installmentSuccess, setInstallmentSuccess] = useState("");
+  const [taxDrafts, setTaxDrafts] = useState<TaxDocumentDraft[]>([]);
+  const [taxDraftType, setTaxDraftType] = useState<"boleta" | "factura">("boleta");
+  const [taxDraftDescription, setTaxDraftDescription] = useState("");
+  const [taxDraftAmount, setTaxDraftAmount] = useState("");
+  const [taxDraftSaving, setTaxDraftSaving] = useState(false);
+  const [taxDraftLoading, setTaxDraftLoading] = useState(false);
+  const [taxDraftError, setTaxDraftError] = useState("");
+  const [taxDraftSuccess, setTaxDraftSuccess] = useState("");
+  const [mockPaymentError, setMockPaymentError] = useState("");
+  const [mockPaymentSuccess, setMockPaymentSuccess] = useState("");
+  const [mockPaymentDescription, setMockPaymentDescription] = useState("");
+  const [mockPaymentAmount, setMockPaymentAmount] = useState("");
+  const [mockPaymentSaving, setMockPaymentSaving] = useState(false);
+  const [reconciliationFile, setReconciliationFile] = useState<File | null>(null);
+  const [reconciliationBatches, setReconciliationBatches] = useState<ReconciliationBatch[]>([]);
+  const [reconciliationLoading, setReconciliationLoading] = useState(false);
+  const [reconciliationSaving, setReconciliationSaving] = useState(false);
+  const [reconciliationError, setReconciliationError] = useState("");
+  const [privateDocuments, setPrivateDocuments] = useState<PrivateDocument[]>([]);
+  const [documentsResidentId, setDocumentsResidentId] = useState("");
+  const [documentTitle, setDocumentTitle] = useState("");
+  const [documentCategory, setDocumentCategory] = useState("other");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const [documentsError, setDocumentsError] = useState("");
+  const [documentsSuccess, setDocumentsSuccess] = useState("");
+  const [documentDownloading, setDocumentDownloading] = useState("");
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditActorFilter, setAuditActorFilter] = useState("");
+  const [auditResourceFilter, setAuditResourceFilter] = useState("");
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
   const [activeView, setActiveView] = useState("dashboard");
   const [dashboardStatus, setDashboardStatus] = useState("");
   const [dashboardError, setDashboardError] = useState("");
@@ -293,6 +462,16 @@ export default function App() {
   const [residentSuccess, setResidentSuccess] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("cima.theme", theme);
+  }, [theme]);
+
+  // toggleTheme alterna el tema persistente para que se aplique al login y a toda la aplicación.
+  function toggleTheme() {
+    setTheme((current) => current === "dark" ? "light" : "dark");
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -713,6 +892,85 @@ export default function App() {
     }
   }, [user]);
 
+  // loadBilling carga el libro interno y, cuando hay residente elegido, calcula su saldo vigente.
+  const loadBilling = useCallback(async () => {
+    if (!hasPermission(user, "billing.read")) return;
+    setBillingLoading(true);
+    setInstallmentLoading(true);
+    setTaxDraftLoading(true);
+    setReconciliationLoading(true);
+    setBillingError("");
+    try {
+      const query = billingResidentId ? `?residentId=${encodeURIComponent(billingResidentId)}` : "";
+      const response = await apiFetch(`/billing/${query}`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo cargar la facturación."));
+      const entries = (await response.json()) as BillingEntry[];
+      setBillingEntries(entries);
+      if (billingResidentId) {
+        const summaryResponse = await apiFetch(`/billing/summary?residentId=${encodeURIComponent(billingResidentId)}`);
+        if (!summaryResponse.ok) throw new Error(await getApiError(summaryResponse, "No se pudo calcular el saldo."));
+        setBillingSummary((await summaryResponse.json()) as BillingSummary);
+      } else {
+        setBillingSummary(null);
+      }
+      const residentQuery = billingResidentId ? `?residentId=${encodeURIComponent(billingResidentId)}` : "";
+      const [plansResponse, draftsResponse, batchesResponse] = await Promise.all([
+        apiFetch(`/billing/installment-plans${residentQuery}`),
+        apiFetch(`/billing/tax-document-drafts${residentQuery}`),
+        apiFetch("/billing/reconciliation/batches"),
+      ]);
+      if (!plansResponse.ok || !draftsResponse.ok || !batchesResponse.ok) {
+        throw new Error("No se pudieron cargar todas las vistas de facturación experimental.");
+      }
+      setInstallmentPlans((await plansResponse.json()) as InstallmentPlan[]);
+      setTaxDrafts((await draftsResponse.json()) as TaxDocumentDraft[]);
+      setReconciliationBatches((await batchesResponse.json()) as ReconciliationBatch[]);
+    } catch (err) {
+      setBillingError(userFacingError(err, "No se pudo cargar la facturación."));
+    } finally {
+      setBillingLoading(false);
+      setInstallmentLoading(false);
+      setTaxDraftLoading(false);
+      setReconciliationLoading(false);
+    }
+  }, [user, billingResidentId]);
+
+  // loadPrivateDocuments obtiene solo metadatos de los documentos que la sesión puede consultar.
+  const loadPrivateDocuments = useCallback(async () => {
+    if (!hasPermission(user, "document.read")) return;
+    setDocumentsLoading(true);
+    setDocumentsError("");
+    const query = documentsResidentId ? `?residentId=${encodeURIComponent(documentsResidentId)}` : "";
+    try {
+      const response = await apiFetch(`/documents/${query}`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudieron cargar los documentos."));
+      setPrivateDocuments((await response.json()) as PrivateDocument[]);
+    } catch (err) {
+      setDocumentsError(userFacingError(err, "No se pudieron cargar los documentos."));
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [user, documentsResidentId]);
+
+  // loadAudit consulta eventos filtrables sin descargar datos fuera del módulo autorizado.
+  const loadAudit = useCallback(async () => {
+    if (!hasPermission(user, "audit.read")) return;
+    setAuditLoading(true);
+    setAuditError("");
+    const query = new URLSearchParams();
+    if (auditActorFilter.trim()) query.set("actor", auditActorFilter.trim());
+    if (auditResourceFilter) query.set("resource", auditResourceFilter);
+    try {
+      const response = await apiFetch(`/audit/${query.size ? `?${query.toString()}` : ""}`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo consultar la auditoría."));
+      setAuditEvents((await response.json()) as AuditEvent[]);
+    } catch (err) {
+      setAuditError(userFacingError(err, "No se pudo consultar la auditoría."));
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [user, auditActorFilter, auditResourceFilter]);
+
   useEffect(() => {
     if (user && activeView === "clinical") {
       void loadClinicalNotes();
@@ -721,7 +979,241 @@ export default function App() {
     if (user && activeView === "food") {
       void loadDietPlans();
     }
-  }, [user, activeView, loadClinicalNotes, loadMedicationEvents, loadDietPlans]);
+    if (user && activeView === "billing") void loadBilling();
+    if (user && activeView === "documents") void loadPrivateDocuments();
+    if (user && activeView === "audit") void loadAudit();
+  }, [user, activeView, loadClinicalNotes, loadMedicationEvents, loadDietPlans, loadBilling, loadPrivateDocuments, loadAudit]);
+
+  async function handleBillingSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountClp = Number(billingAmount);
+    if (!billingResidentId || !billingDescription.trim() || !Number.isSafeInteger(amountClp) || amountClp <= 0) {
+      setBillingError("Selecciona residente e ingresa descripción y monto entero válido.");
+      return;
+    }
+    setBillingError("");
+    setBillingSuccess("");
+    setBillingSaving(true);
+    try {
+      const path = billingKind === "charge" ? "/billing/charges" : "/billing/payments";
+      const response = await apiFetch(path, {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          description: billingDescription.trim(),
+          amountClp,
+          dueDate: billingKind === "charge" ? billingDueDate : "",
+          paymentMethod: billingKind === "payment" ? billingPaymentMethod : "",
+          reference: billingReference.trim(),
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo registrar el movimiento."));
+      setBillingSuccess(billingKind === "charge" ? "Cargo registrado." : "Pago registrado.");
+      setBillingDescription("");
+      setBillingAmount("");
+      setBillingDueDate("");
+      setBillingReference("");
+      await loadBilling();
+    } catch (err) {
+      setBillingError(userFacingError(err, "No se pudo registrar el movimiento."));
+    } finally {
+      setBillingSaving(false);
+    }
+  }
+
+  async function handleInstallmentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const totalAmountClp = Number(installmentTotal);
+    const installmentCountValue = Number(installmentCount);
+    if (!billingResidentId || !installmentDescription.trim() || !Number.isSafeInteger(totalAmountClp) || !Number.isInteger(installmentCountValue)) {
+      setInstallmentError("Selecciona residente e ingresa descripción, monto entero y cantidad de cuotas.");
+      return;
+    }
+    setInstallmentError("");
+    setInstallmentSuccess("");
+    setInstallmentSaving(true);
+    try {
+      const response = await apiFetch("/billing/installment-plans", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          description: installmentDescription.trim(),
+          totalAmountClp,
+          installmentCount: installmentCountValue,
+          firstDueDate: installmentFirstDueDate,
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo crear el plan de cuotas."));
+      setInstallmentSuccess("Plan local de cuotas creado; no se emitieron documentos fiscales.");
+      setInstallmentDescription("");
+      setInstallmentTotal("");
+      await loadBilling();
+    } catch (err) {
+      setInstallmentError(userFacingError(err, "No se pudo crear el plan de cuotas."));
+    } finally {
+      setInstallmentSaving(false);
+    }
+  }
+
+  async function handleTaxDraftSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountClp = Number(taxDraftAmount);
+    if (!billingResidentId || !taxDraftDescription.trim() || !Number.isSafeInteger(amountClp) || amountClp <= 0) {
+      setTaxDraftError("Selecciona residente e ingresa descripción y monto entero válido.");
+      return;
+    }
+    setTaxDraftError("");
+    setTaxDraftSuccess("");
+    setTaxDraftSaving(true);
+    try {
+      const response = await apiFetch("/billing/tax-document-drafts", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          documentType: taxDraftType,
+          description: taxDraftDescription.trim(),
+          amountClp,
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo guardar el borrador."));
+      setTaxDraftSuccess("Borrador interno creado. No es un DTE y no tiene validez tributaria.");
+      setTaxDraftDescription("");
+      setTaxDraftAmount("");
+      await loadBilling();
+    } catch (err) {
+      setTaxDraftError(userFacingError(err, "No se pudo guardar el borrador."));
+    } finally {
+      setTaxDraftSaving(false);
+    }
+  }
+
+  async function handleMockPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountClp = Number(mockPaymentAmount);
+    if (!billingResidentId || !mockPaymentDescription.trim() || !Number.isSafeInteger(amountClp) || amountClp <= 0) {
+      setMockPaymentError("Selecciona residente e ingresa descripción y monto entero válido.");
+      return;
+    }
+    setMockPaymentError("");
+    setMockPaymentSuccess("");
+    setMockPaymentSaving(true);
+    try {
+      const response = await apiFetch("/billing/mock-payments", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          description: mockPaymentDescription.trim(),
+          amountClp,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo completar la simulación."));
+      const result = (await response.json()) as { simulated: boolean; message: string };
+      setMockPaymentSuccess(result.message);
+      setMockPaymentDescription("");
+      setMockPaymentAmount("");
+      await loadBilling();
+    } catch (err) {
+      setMockPaymentError(userFacingError(err, "No se pudo completar la simulación."));
+    } finally {
+      setMockPaymentSaving(false);
+    }
+  }
+
+  async function handleReconciliationImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reconciliationFile) {
+      setReconciliationError("Selecciona un CSV de prueba para conciliar.");
+      return;
+    }
+    if (reconciliationFile.size > 5 * 1024 * 1024) {
+      setReconciliationError("El CSV no puede superar 5 MiB.");
+      return;
+    }
+    setReconciliationError("");
+    setReconciliationSaving(true);
+    try {
+      const response = await apiFetch("/billing/reconciliation/import", {
+        method: "POST",
+        headers: { "Content-Type": "text/csv" },
+        body: await reconciliationFile.text(),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo conciliar el CSV."));
+      setReconciliationFile(null);
+      const input = document.getElementById("billing-reconciliation-file") as HTMLInputElement | null;
+      if (input) input.value = "";
+      await loadBilling();
+    } catch (err) {
+      setReconciliationError(userFacingError(err, "No se pudo conciliar el CSV."));
+    } finally {
+      setReconciliationSaving(false);
+    }
+  }
+
+  async function handleDocumentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!documentsResidentId || !documentFile || !documentTitle.trim()) {
+      setDocumentsError("Selecciona residente, archivo y título.");
+      return;
+    }
+    if (documentFile.size > 8 * 1024 * 1024) {
+      setDocumentsError("El archivo no puede superar 8 MiB.");
+      return;
+    }
+    setDocumentsError("");
+    setDocumentsSuccess("");
+    setDocumentSaving(true);
+    try {
+      const dataURL = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("No se pudo leer el archivo."));
+        reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+        reader.readAsDataURL(documentFile);
+      });
+      const response = await apiFetch("/documents/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: documentsResidentId,
+          fileName: documentFile.name,
+          title: documentTitle.trim(),
+          category: documentCategory,
+          contentType: documentFile.type || "application/octet-stream",
+          contentBase64: dataURL.split(",", 2)[1] ?? "",
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo guardar el documento."));
+      setDocumentsSuccess("Documento guardado de forma privada.");
+      setDocumentTitle("");
+      setDocumentFile(null);
+      const input = document.getElementById("document-file") as HTMLInputElement | null;
+      if (input) input.value = "";
+      await loadPrivateDocuments();
+    } catch (err) {
+      setDocumentsError(userFacingError(err, "No se pudo guardar el documento."));
+    } finally {
+      setDocumentSaving(false);
+    }
+  }
+
+  // downloadPrivateDocument recupera el archivo bajo autorización y libera la URL temporal al descargarlo.
+  async function downloadPrivateDocument(documentItem: PrivateDocument) {
+    setDocumentsError("");
+    setDocumentDownloading(documentItem.id);
+    try {
+      const response = await apiFetch(`/documents/${encodeURIComponent(documentItem.id)}/download`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo descargar el documento."));
+      const objectURL = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectURL;
+      link.download = documentItem.fileName;
+      link.click();
+      URL.revokeObjectURL(objectURL);
+    } catch (err) {
+      setDocumentsError(userFacingError(err, "No se pudo descargar el documento."));
+    } finally {
+      setDocumentDownloading("");
+    }
+  }
 
   async function handleClinicalSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1181,11 +1673,6 @@ export default function App() {
     reception: "Recepción",
     accounting: "Contabilidad",
   };
-  const roomStatusLabels: Record<RoomStatus, string> = {
-    available: "Disponible",
-    maintenance: "En mantención",
-    closed: "Cerrada",
-  };
   const stayStatusLabels: Record<StayStatus, string> = {
     planned: "Planificada",
     active: "Activa",
@@ -1204,7 +1691,10 @@ export default function App() {
     return (
       <main className="login-layout">
         <section className="login-panel" aria-labelledby="login-title">
-          <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+          <div className="login-topbar">
+            <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
           <p className="eyebrow">Residencia de personas mayores</p>
           <h1 id="login-title">Ingreso al sistema</h1>
           <p className="login-intro">Acceso seguro a la operación y cuidado diario.</p>
@@ -1270,7 +1760,10 @@ export default function App() {
     return (
       <main className="approval-layout">
         <section className="approval-panel" aria-labelledby="approval-title">
-          <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+          <div className="login-topbar">
+            <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
           <p className="eyebrow">Registro con Google</p>
           <h1 id="approval-title">Cuenta creada</h1>
           <p className="login-intro">Hola, {user.displayName || user.username}. Tu registro se completó correctamente.</p>
@@ -1317,7 +1810,7 @@ export default function App() {
             <p className="eyebrow">{roleLabels[user.role] ?? user.role}</p>
             <h1 id="app-title">{modules.find((module) => module.id === currentView)?.label ?? "CIMA"}</h1>
           </div>
-          <div className="header-user"><span className="online-dot" /> Sesión activa</div>
+          <div className="header-user"><ThemeToggle theme={theme} onToggle={toggleTheme} /><span className="online-dot" /> Sesión activa</div>
         </header>
 
         {currentView === "dashboard" && hasPermission(user, "dashboard.read") ? (
@@ -1431,7 +1924,7 @@ export default function App() {
                     required
                     disabled={roomsSaving}
                   />
-                  <label htmlFor="room-status">Estado</label>
+                  <label htmlFor="room-status">Estado operativo</label>
                   <select
                     id="room-status"
                     value={roomStatus}
@@ -1467,8 +1960,9 @@ export default function App() {
                 <p>No hay habitaciones registradas.</p>
               ) : (
                 <ul className="resident-list">
-                  {rooms.map((room) => (
-                    <li key={room.id}>
+                  {rooms.map((room) => {
+                    const displayStatus = roomDisplayStatus(room);
+                    return <li key={room.id}>
                       <div className="room-record">
                         <div className="room-record-heading">
                           <div className="room-summary">
@@ -1476,7 +1970,9 @@ export default function App() {
                             <span>Ocupación: {room.occupancy} de {room.capacity}</span>
                           </div>
                           <div className="resident-actions">
-                            <span className={`status room-status-${room.status}`}>{roomStatusLabels[room.status]}</span>
+                            <span className={`status room-status-${displayStatus.kind}`} title={`Ocupación: ${room.occupancy} de ${room.capacity}`}>
+                              {displayStatus.label}
+                            </span>
                             {hasPermission(user, "room.write") && <button type="button" onClick={() => startRoomEdit(room)}>Editar</button>}
                           </div>
                         </div>
@@ -1540,8 +2036,8 @@ export default function App() {
                           </ol>
                         )}
                       </div>
-                    </li>
-                  ))}
+                    </li>;
+                  })}
                 </ul>
               )}
             </section>
@@ -1834,6 +2330,174 @@ export default function App() {
               )}
             </section>
           </section>
+        ) : currentView === "billing" && hasPermission(user, "billing.read") ? (
+          <section className="resident-content" aria-label="Facturación">
+            <section className="module-summary-strip" aria-label="Resumen de cuenta corriente">
+              <div><span>Cargos</span><strong>{formatCLP(billingSummary?.chargesClp ?? 0)}</strong></div>
+              <div><span>Pagos</span><strong>{formatCLP(billingSummary?.paymentsClp ?? 0)}</strong></div>
+              <div><span>Saldo pendiente</span><strong>{formatCLP(billingSummary?.balanceClp ?? 0)}</strong></div>
+            </section>
+            <section className="card" aria-labelledby="billing-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">CUENTA CORRIENTE · CLP</p><h2 id="billing-title">Movimientos</h2></div>
+                <button type="button" onClick={() => void loadBilling()} disabled={billingLoading}>{billingLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              <label htmlFor="billing-resident-filter">Residente</label>
+              <select id="billing-resident-filter" value={billingResidentId} onChange={(event) => setBillingResidentId(event.target.value)}>
+                <option value="">Todas las cuentas</option>
+                {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>)}
+              </select>
+              {billingError && <p className="error" role="alert">{billingError}</p>}
+              {hasPermission(user, "billing.write") && (
+                <form className="module-entry-form" onSubmit={handleBillingSubmit}>
+                  <h3>Registrar movimiento</h3>
+                  <label htmlFor="billing-kind">Tipo</label>
+                  <select id="billing-kind" value={billingKind} onChange={(event) => setBillingKind(event.target.value as "charge" | "payment")} disabled={billingSaving}>
+                    <option value="charge">Cargo</option>
+                    <option value="payment">Pago</option>
+                  </select>
+                  {!billingResidentId && <p className="form-hint">Selecciona un residente para registrar el movimiento.</p>}
+                  <label htmlFor="billing-description">Descripción</label>
+                  <input id="billing-description" value={billingDescription} onChange={(event) => setBillingDescription(event.target.value)} maxLength={140} required disabled={billingSaving} />
+                  <label htmlFor="billing-amount">Monto en pesos</label>
+                  <input id="billing-amount" type="number" min="1" step="1" value={billingAmount} onChange={(event) => setBillingAmount(event.target.value)} required disabled={billingSaving} />
+                  {billingKind === "charge" ? (
+                    <>
+                      <label htmlFor="billing-due-date">Vencimiento</label>
+                      <input id="billing-due-date" type="date" value={billingDueDate} onChange={(event) => setBillingDueDate(event.target.value)} disabled={billingSaving} />
+                    </>
+                  ) : (
+                    <>
+                      <label htmlFor="billing-payment-method">Medio de pago</label>
+                      <select id="billing-payment-method" value={billingPaymentMethod} onChange={(event) => setBillingPaymentMethod(event.target.value)} disabled={billingSaving}>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="tarjeta">Tarjeta</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </>
+                  )}
+                  <label htmlFor="billing-reference">Referencia</label>
+                  <input id="billing-reference" value={billingReference} onChange={(event) => setBillingReference(event.target.value)} maxLength={100} disabled={billingSaving} />
+                  {billingSuccess && <p className="success" role="status">{billingSuccess}</p>}
+                  <button type="submit" disabled={billingSaving || !billingResidentId}>{billingSaving ? "Guardando..." : billingKind === "charge" ? "Registrar cargo" : "Registrar pago"}</button>
+                </form>
+              )}
+            </section>
+            <section className="card" aria-labelledby="billing-ledger-title">
+              <h2 id="billing-ledger-title">Libro de movimientos</h2>
+              {billingLoading ? <p role="status">Cargando movimientos...</p> : billingEntries.length === 0 ? <p>No hay movimientos para mostrar.</p> : (
+                <div className="table-scroll"><table className="data-table">
+                  <thead><tr><th>Fecha</th><th>Residente</th><th>Movimiento</th><th>Descripción</th><th>Monto</th><th>Registrado por</th></tr></thead>
+                  <tbody>{billingEntries.map((entry) => {
+                    const resident = residents.find((item) => item.id === entry.residentId);
+                    return <tr key={entry.id}>
+                      <td>{new Date(entry.createdAt).toLocaleDateString("es-CL")}</td>
+                      <td>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</td>
+                      <td><span className={`status ${entry.kind === "payment" ? "status-payment" : "status-charge"}`}>{entry.kind === "payment" ? "Pago" : "Cargo"}</span></td>
+                      <td>{entry.description}{entry.reference ? ` · ${entry.reference}` : ""}</td>
+                      <td>{formatCLP(entry.amountClp)}</td>
+                      <td>{entry.createdBy}</td>
+                    </tr>;
+                  })}</tbody>
+                </table></div>
+              )}
+            </section>
+          </section>
+        ) : currentView === "documents" && hasPermission(user, "document.read") ? (
+          <section className="resident-content" aria-label="Documentos privados">
+            {hasPermission(user, "document.write") && (
+              <section className="card" aria-labelledby="document-upload-title">
+                <h2 id="document-upload-title">Guardar documento</h2>
+                <form className="module-entry-form" onSubmit={handleDocumentSubmit}>
+                  <label htmlFor="documents-resident">Residente</label>
+                  <select id="documents-resident" value={documentsResidentId} onChange={(event) => setDocumentsResidentId(event.target.value)} required disabled={documentSaving}>
+                    <option value="">Seleccionar residente</option>
+                    {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>)}
+                  </select>
+                  <label htmlFor="document-title">Título</label>
+                  <input id="document-title" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={140} required disabled={documentSaving} />
+                  <label htmlFor="document-category">Categoría</label>
+                  <select id="document-category" value={documentCategory} onChange={(event) => setDocumentCategory(event.target.value)} disabled={documentSaving}>
+                    <option value="identity">Identidad</option>
+                    <option value="medical">Médico</option>
+                    <option value="contract">Contrato</option>
+                    <option value="billing">Facturación</option>
+                    <option value="other">Otro</option>
+                  </select>
+                  <label htmlFor="document-file">Archivo (máximo 8 MiB)</label>
+                  <input id="document-file" type="file" accept="application/pdf,image/png,image/jpeg,text/plain" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} required disabled={documentSaving} />
+                  {documentsError && <p className="error" role="alert">{documentsError}</p>}
+                  {documentsSuccess && <p className="success" role="status">{documentsSuccess}</p>}
+                  <button type="submit" disabled={documentSaving}>{documentSaving ? "Guardando..." : "Guardar documento privado"}</button>
+                </form>
+              </section>
+            )}
+            <section className="card" aria-labelledby="documents-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ARCHIVO PRIVADO</p><h2 id="documents-list-title">Documentos</h2></div>
+                <button type="button" onClick={() => void loadPrivateDocuments()} disabled={documentsLoading}>{documentsLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              <label htmlFor="documents-resident-filter">Filtrar por residente</label>
+              <select id="documents-resident-filter" value={documentsResidentId} onChange={(event) => setDocumentsResidentId(event.target.value)}>
+                <option value="">Todos</option>
+                {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>)}
+              </select>
+              {documentsError && !hasPermission(user, "document.write") && <p className="error" role="alert">{documentsError}</p>}
+              {documentsLoading ? <p role="status">Cargando documentos...</p> : privateDocuments.length === 0 ? <p>No hay documentos para mostrar.</p> : (
+                <ul className="resident-list">
+                  {privateDocuments.map((item) => {
+                    const resident = residents.find((entry) => entry.id === item.residentId);
+                    return <li key={item.id} className="document-list-row">
+                      <div className="document-summary">
+                        <strong>{item.title}</strong>
+                        <span>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"} · {item.category} · {(item.sizeBytes / 1024).toFixed(0)} KiB</span>
+                        <small>{new Date(item.createdAt).toLocaleDateString("es-CL")} · {item.uploadedBy}</small>
+                      </div>
+                      <button type="button" className="secondary-action" onClick={() => void downloadPrivateDocument(item)} disabled={documentDownloading === item.id}>
+                        {documentDownloading === item.id ? "Descargando..." : "Descargar"}
+                      </button>
+                    </li>;
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "audit" && hasPermission(user, "audit.read") ? (
+          <section className="resident-content" aria-label="Auditoría del sistema">
+            <section className="card" aria-labelledby="audit-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">TRAZABILIDAD</p><h2 id="audit-title">Eventos recientes</h2></div>
+                <button type="button" onClick={() => void loadAudit()} disabled={auditLoading}>{auditLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              <div className="audit-filters">
+                <div><label htmlFor="audit-actor">Usuario</label><input id="audit-actor" value={auditActorFilter} onChange={(event) => setAuditActorFilter(event.target.value)} maxLength={80} /></div>
+                <div><label htmlFor="audit-resource">Módulo</label>
+                  <select id="audit-resource" value={auditResourceFilter} onChange={(event) => setAuditResourceFilter(event.target.value)}>
+                    <option value="">Todos</option>
+                    <option value="billing">Facturación</option><option value="documents">Documentos</option>
+                    <option value="residents">Residentes</option><option value="rooms">Habitaciones</option>
+                    <option value="stays">Estadías</option><option value="medical">Clínica</option>
+                    <option value="medication-events">Medicamentos</option><option value="diet-plans">Alimentación</option>
+                  </select>
+                </div>
+                <button type="button" onClick={() => void loadAudit()} disabled={auditLoading}>Aplicar filtros</button>
+              </div>
+              {auditError && <p className="error" role="alert">{auditError}</p>}
+              {auditLoading ? <p role="status">Cargando eventos...</p> : auditEvents.length === 0 ? <p>No hay eventos para mostrar.</p> : (
+                <div className="table-scroll"><table className="data-table">
+                  <thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Recurso</th><th>Resultado</th></tr></thead>
+                  <tbody>{auditEvents.map((event) => <tr key={event.id}>
+                    <td>{new Date(event.createdAt).toLocaleString("es-CL")}</td>
+                    <td>{event.actor}</td>
+                    <td>{event.action.toUpperCase()}</td>
+                    <td>{event.resource}{event.resourceId ? ` · ${event.resourceId}` : ""}</td>
+                    <td>{event.statusCode}</td>
+                  </tr>)}</tbody>
+                </table></div>
+              )}
+            </section>
+          </section>
         ) : currentView === "residents" && hasPermission(user, "resident.read") ? (
           <section className="resident-content" aria-label="Gestión de residentes">
             {hasPermission(user, "resident.create") && (
@@ -1927,6 +2591,112 @@ export default function App() {
                   <div>
                     <strong>
                       {resident.firstName} {resident.lastName}
+              {hasPermission(user, "billing.write") && (
+                <>
+                  <section className="card" aria-labelledby="installment-plan-title">
+                    <h2 id="installment-plan-title">Plan de cuotas</h2>
+                    <form className="module-entry-form" onSubmit={handleInstallmentSubmit}>
+                      <label htmlFor="installment-description">Descripción</label>
+                      <input id="installment-description" value={installmentDescription} onChange={(event) => setInstallmentDescription(event.target.value)} maxLength={140} required disabled={installmentSaving} />
+                      <label htmlFor="installment-total">Total en pesos</label>
+                      <input id="installment-total" type="number" min="2" step="1" value={installmentTotal} onChange={(event) => setInstallmentTotal(event.target.value)} required disabled={installmentSaving} />
+                      <label htmlFor="installment-count">Cantidad de cuotas</label>
+                      <input id="installment-count" type="number" min="2" max="36" step="1" value={installmentCount} onChange={(event) => setInstallmentCount(event.target.value)} required disabled={installmentSaving} />
+                      <label htmlFor="installment-first-date">Primer vencimiento</label>
+                      <input id="installment-first-date" type="date" value={installmentFirstDueDate} onChange={(event) => setInstallmentFirstDueDate(event.target.value)} required disabled={installmentSaving} />
+                      <p className="form-hint">El total se divide en montos enteros CLP; el residuo se agrega a la última cuota. El total del plan se suma al saldo interno.</p>
+                      {installmentError && <p className="error" role="alert">{installmentError}</p>}
+                      {installmentSuccess && <p className="success" role="status">{installmentSuccess}</p>}
+                      <button type="submit" disabled={installmentSaving || !billingResidentId}>{installmentSaving ? "Guardando..." : "Crear plan de cuotas"}</button>
+                    </form>
+                    {installmentLoading ? <p role="status">Cargando planes...</p> : installmentPlans.length === 0 ? <p>No hay planes para mostrar.</p> : (
+                      <div className="table-scroll"><table className="data-table">
+                        <thead><tr><th>Residente</th><th>Plan</th><th>Cuotas</th><th>Calendario</th><th>Total</th></tr></thead>
+                        <tbody>{installmentPlans.map((plan) => {
+                          const resident = residents.find((item) => item.id === plan.residentId);
+                          return <tr key={plan.id}>
+                            <td>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</td>
+                            <td>{plan.description}</td>
+                            <td>{plan.installmentCount}</td>
+                            <td>{plan.installments.map((installment) => `${installment.number}: ${new Date(`${installment.dueDate.slice(0, 10)}T12:00:00`).toLocaleDateString("es-CL")} ${formatCLP(installment.amountClp)}`).join(" · ")}</td>
+                            <td>{formatCLP(plan.totalAmountClp)}</td>
+                          </tr>;
+                        })}</tbody>
+                      </table></div>
+                    )}
+                  </section>
+
+                  <section className="card" aria-labelledby="tax-draft-title">
+                    <h2 id="tax-draft-title">Borrador administrativo</h2>
+                    <p className="warning-note">Solo vista previa interna. No es un DTE, no tiene folio ni validez tributaria y no se envía al SII.</p>
+                    <form className="module-entry-form" onSubmit={handleTaxDraftSubmit}>
+                      <label htmlFor="tax-draft-type">Tipo de borrador</label>
+                      <select id="tax-draft-type" value={taxDraftType} onChange={(event) => setTaxDraftType(event.target.value as "boleta" | "factura")} disabled={taxDraftSaving}>
+                        <option value="boleta">Boleta (borrador)</option>
+                        <option value="factura">Factura (borrador)</option>
+                      </select>
+                      <label htmlFor="tax-draft-description">Descripción</label>
+                      <input id="tax-draft-description" value={taxDraftDescription} onChange={(event) => setTaxDraftDescription(event.target.value)} maxLength={180} required disabled={taxDraftSaving} />
+                      <label htmlFor="tax-draft-amount">Monto total en pesos</label>
+                      <input id="tax-draft-amount" type="number" min="1" step="1" value={taxDraftAmount} onChange={(event) => setTaxDraftAmount(event.target.value)} required disabled={taxDraftSaving} />
+                      {taxDraftError && <p className="error" role="alert">{taxDraftError}</p>}
+                      {taxDraftSuccess && <p className="success" role="status">{taxDraftSuccess}</p>}
+                      <button type="submit" disabled={taxDraftSaving || !billingResidentId}>{taxDraftSaving ? "Guardando..." : "Crear borrador interno"}</button>
+                    </form>
+                    {taxDraftLoading ? <p role="status">Cargando borradores...</p> : taxDrafts.length === 0 ? <p>No hay borradores para mostrar.</p> : (
+                      <ul className="resident-list">
+                        {taxDrafts.map((draft) => {
+                          const resident = residents.find((item) => item.id === draft.residentId);
+                          return <li key={draft.id}>
+                            <div className="document-summary">
+                              <strong>{draft.documentType.toUpperCase()} · {draft.description}</strong>
+                              <span>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"} · {formatCLP(draft.amountClp)}</span>
+                              <small>BORRADOR · SIN VALIDEZ TRIBUTARIA</small>
+                            </div>
+                          </li>;
+                        })}
+                      </ul>
+                    )}
+                  </section>
+
+                  <section className="card" aria-labelledby="mock-payment-title">
+                    <h2 id="mock-payment-title">Pago de prueba local</h2>
+                    <p className="warning-note">Simulación local: no se solicitan tarjetas, no hay conexión a Transbank y no se mueve dinero.</p>
+                    <form className="module-entry-form" onSubmit={handleMockPayment}>
+                      <label htmlFor="mock-payment-description">Descripción</label>
+                      <input id="mock-payment-description" value={mockPaymentDescription} onChange={(event) => setMockPaymentDescription(event.target.value)} maxLength={140} required disabled={mockPaymentSaving} />
+                      <label htmlFor="mock-payment-amount">Monto simulado en pesos</label>
+                      <input id="mock-payment-amount" type="number" min="1" step="1" value={mockPaymentAmount} onChange={(event) => setMockPaymentAmount(event.target.value)} required disabled={mockPaymentSaving} />
+                      {mockPaymentError && <p className="error" role="alert">{mockPaymentError}</p>}
+                      {mockPaymentSuccess && <p className="success" role="status">{mockPaymentSuccess}</p>}
+                      <button type="submit" disabled={mockPaymentSaving || !billingResidentId}>{mockPaymentSaving ? "Simulando..." : "Simular pago aprobado"}</button>
+                    </form>
+                  </section>
+
+                  <section className="card" aria-labelledby="reconciliation-title">
+                    <h2 id="reconciliation-title">Conciliar cartola de prueba</h2>
+                    <p className="form-hint">Formato CSV: <code>date,amount_clp,reference,description</code>. Fecha AAAA-MM-DD; monto entero CLP. La cartola original no se conserva.</p>
+                    <form className="module-entry-form" onSubmit={handleReconciliationImport}>
+                      <label htmlFor="billing-reconciliation-file">CSV sintético</label>
+                      <input id="billing-reconciliation-file" type="file" accept=".csv,text/csv" onChange={(event) => setReconciliationFile(event.target.files?.[0] ?? null)} required disabled={reconciliationSaving} />
+                      {reconciliationError && <p className="error" role="alert">{reconciliationError}</p>}
+                      <button type="submit" disabled={reconciliationSaving}>{reconciliationSaving ? "Conciliando..." : "Comparar CSV"}</button>
+                    </form>
+                    {reconciliationLoading ? <p role="status">Cargando resultados...</p> : reconciliationBatches.map((batch) => (
+                      <div className="table-scroll" key={batch.id}>
+                        <h3>Importado {new Date(batch.createdAt).toLocaleString("es-CL")} · {batch.importedBy}</h3>
+                        <table className="data-table">
+                          <thead><tr><th>Línea</th><th>Fecha</th><th>Referencia</th><th>Monto</th><th>Resultado</th></tr></thead>
+                          <tbody>{batch.rows.map((row) => <tr key={`${batch.id}-${row.line}`}>
+                            <td>{row.line}</td><td>{new Date(`${row.date.slice(0, 10)}T12:00:00`).toLocaleDateString("es-CL")}</td>
+                            <td>{row.reference}</td><td>{formatCLP(row.amountClp)}</td><td>{row.status === "matched" ? "Coincide" : "Sin coincidencia"}</td>
+                          </tr>)}</tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </section>
+                </>
+              )}
                     </strong>
                   </div>
 
