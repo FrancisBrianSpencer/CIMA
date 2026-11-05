@@ -8,11 +8,11 @@ Centraliza residentes, habitaciones, alimentación, indicaciones médicas, medic
 
 > **Proyecto independiente:** CIMA no está asociado, afiliado ni desarrollado para terceros que utilicen nombres comerciales similares.
 
-## Estado del proyecto — base publicada v0.3, desarrollo posterior en curso
+## Estado del proyecto — versión técnica actualizada v1.0
 
-La última versión publicada con release/tag sigue siendo v0.3. El árbol de trabajo ya incluye CRUD y ficha de residentes, autenticación JWT, RBAC inicial, una primera interfaz de dashboard y pruebas de integración API/MongoDB aisladas; estos avances aún no se han asociado a un nuevo release/tag. El estado detallado está en [la especificación técnica v0.5](docs/ESPECIFICACION_TECNICA_CIMA_v0.5.md) y su [versión PDF](docs/ESPECIFICACION_TECNICA_CIMA_v0.5.pdf).
+La especificación técnica actual está en [docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md](docs/ESPECIFICACION_TECNICA_CIMA_v0.6.md). En ella se reflejan los avances verificados: operación residencial, OAuth2, cuotas, borradores no fiscales, pagos simulados locales, conciliación CSV, documentos privados con ClamAV, auditoría y tema claro/oscuro. No se conectan bancos ni pasarelas reales.
 
-El entorno requiere únicamente Docker Desktop y Git. No es necesario instalar Go, Node.js ni MongoDB directamente en el computador.
+La última release/tag publicada sigue siendo v0.3, pero el estado real del proyecto está descrito en el documento v0.6 y no corresponde a un release formal todavía. El entorno requiere únicamente Docker Desktop y Git; no es necesario instalar Go, Node.js ni MongoDB en el equipo.
 
 ## Stack
 
@@ -21,6 +21,9 @@ El entorno requiere únicamente Docker Desktop y Git. No es necesario instalar G
 - MongoDB
 - Docker + Docker Compose
 - JWT HS256, refresh token y bcrypt implementados; RBAC backend por permiso
+- Libro de cargos/pagos en CLP, documentos privados en MongoDB y auditoría de mutaciones API
+- Tema claro/oscuro con preferencia persistente por navegador
+- Análisis ClamAV privado para documentos y límites HTTP por IP/cuerpo
 - Vitest, pruebas Go e integración API/MongoDB implementadas; pruebas E2E pendientes
 - Interfaz y mensajes en español, UTF-8 y locale `es-CL`
 - GitHub Actions
@@ -64,7 +67,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-La primera ejecución puede tardar porque Docker descarga las imágenes base y construye los contenedores.
+La primera ejecución puede tardar porque Docker descarga las imágenes base, construye los contenedores y ClamAV descarga sus firmas. El backend espera que el escáner esté saludable antes de iniciar; si el escáner no está disponible, las cargas de documentos se rechazan.
 
 ### Servicios
 
@@ -99,6 +102,8 @@ Windows
        │    └── Node.js
        ├── backend
        │    └── Go
+       ├── clamav
+       │    └── análisis de documentos
        └── mongodb
             └── MongoDB
 ```
@@ -110,6 +115,7 @@ docker compose ps
 docker compose logs -f
 docker compose logs -f backend
 docker compose logs -f frontend
+docker compose logs -f clamav
 docker compose build --no-cache
 docker compose --profile integration run --rm integration-tests
 ```
@@ -121,8 +127,18 @@ APP_ENV=development
 APP_PORT=8080
 MONGO_URI=mongodb://mongodb:27017
 MONGO_DATABASE=cima
-JWT_SECRET=change-this-development-secret
+JWT_SECRET=REPLACE_WITH_STRONG_PRIVATE_SECRET
 CORS_ORIGIN=http://localhost:5173
+OAUTH_GOOGLE_CLIENT_ID=
+OAUTH_GOOGLE_CLIENT_SECRET=
+OAUTH_GOOGLE_REDIRECT_URI=http://localhost:8080/auth/oauth/google/callback
+OAUTH_MICROSOFT_CLIENT_ID=
+OAUTH_MICROSOFT_CLIENT_SECRET=
+OAUTH_MICROSOFT_TENANT_ID=common
+OAUTH_MICROSOFT_REDIRECT_URI=http://localhost:8080/auth/oauth/microsoft/callback
+OAUTH_FRONTEND_REDIRECT_URI=http://localhost:5173/
+OAUTH_ALLOWED_DOMAINS=
+PAYMENT_MODE=mock
 ```
 
 **Nunca subas `.env` al repositorio.** En producción, usa un gestor de secretos y un `JWT_SECRET` fuerte y aleatorio.
@@ -161,6 +177,12 @@ CIMA/
 └── README.md
 ```
 
+## OAuth2 y autenticación federada
+
+El backend soporta inicio de sesión y registro con Google y Microsoft/Outlook. Usa `state`, PKCE S256, callbacks fijados por configuración y códigos de canje de un solo uso; después emite los mismos JWT locales con RBAC. Los client secrets permanecen en `.env` y no se envían al frontend.
+
+Configura en Google Cloud Console y Microsoft Entra ID los callbacks exactos indicados en `.env.example`. Al completar esas credenciales, `docker compose up --build` habilita los botones automáticamente. Las cuentas nuevas quedan en rol `pending`, sin permisos, hasta que un administrador les asigne un rol aprobado. El enlace automático por correo está deshabilitado para evitar apropiación de cuentas existentes.
+
 ## Funcionalidades previstas
 
 ### Residentes
@@ -197,26 +219,24 @@ Acciones relevantes como login/logout, cambios de residentes, información médi
 
 ## Estado funcional actual
 
-El proyecto todavía no es el MVP completo. El estado de desarrollo incluye:
+El proyecto ya no está en el punto de una base preliminar: el estado real del código incluye:
 
-- API Go funcionando
-- Conexión con MongoDB
+- API Go funcionando con MongoDB
 - Endpoint `/health`
-- CRUD de residentes: crear, listar, consultar por ID, editar y archivar sin borrar físicamente
-- Habitaciones: catálogo, asignación/liberación, ocupación y trazabilidad; protegidas por RBAC
+- CRUD de residentes con archivado lógico
+- Habitaciones: catálogo, asignación/liberación, ocupación y trazabilidad protegida por RBAC
+- Estadías: modelo, validación y rutas CRUD
+- Atención clínica: notas con severidad, observaciones y lista por residente
+- Medicación: eventos programados/administrados con registro por residente
 - Timestamps de creación, actualización y archivado
-- Ficha personal con contactos principal y de emergencia
-- Frontend React/TypeScript
-- Edición de identidad y ficha; confirmación para archivar
-- Validación backend y manejo de estados de carga/error/éxito
+- Frontend React/TypeScript con módulos visibles según permisos
+- Login, refresh y perfil autenticado
+- Gestión de usuarios por API y permisos por endpoint
 - Construcción completa mediante Docker
-- Pruebas unitarias Go de validaciones, JWT y RBAC; pruebas Vitest para permisos y fechas
-- Login, refresh, perfil autenticado, gestión de usuarios por API y permisos por endpoint
-- Login web y dashboard inicial con módulos visibles según permisos
-- Fechas de ficha en formato `dd/mm/aaaa`, con autoformato y calendario; API conserva `AAAA-MM-DD`
-- Mensajes del usuario en español; documento declarado UTF-8 y `es-CL`
+- Pruebas Go y build Vite ejecutados con Docker
+- Mensajes en español y compatibilidad de idioma `es-CL`
 
-Estadías, alimentación, atención clínica, medicamentos, auditoría, documentos y facturación aún están pendientes o tienen rutas placeholder. El siguiente módulo recomendado es estadías, vinculadas al historial de habitaciones. No usar datos reales de residentes: aún faltan controles de seguridad y privacidad para producción.
+Lo que falta antes de cerrar la primera versión operativa es principalmente: alimentación, facturación/documentos, auditoría real, administración de usuarios avanzada y la integración OAuth2 con Google/Microsoft, además de hardening de seguridad para producción.
 
 ## Seguridad
 

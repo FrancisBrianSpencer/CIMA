@@ -1,5 +1,7 @@
 export type AuthUser = {
   username: string;
+  displayName?: string;
+  email?: string;
   role: string;
   permissions?: string[];
 };
@@ -14,6 +16,8 @@ export type AuthCredentials = {
   username: string;
   password: string;
 };
+
+export type OAuthProvider = "google" | "microsoft";
 
 export const API_URL =
   import.meta.env.VITE_API_URL ?? "http://localhost:8080/api/v1";
@@ -123,6 +127,55 @@ export async function authenticate(credentials: AuthCredentials) {
   const session = (await response.json()) as AuthSession;
   storeSession({ token: session.token, refreshToken: session.refreshToken });
   return apiFetch("/auth/me");
+}
+
+// fetchOAuthProviders consulta los proveedores que el backend tiene configurados.
+export async function fetchOAuthProviders(): Promise<OAuthProvider[]> {
+  const response = await fetch(`${AUTH_URL}/auth/oauth/providers`);
+  if (!response.ok) return [];
+  const data = (await response.json()) as { providers?: string[] };
+  return (data.providers ?? []).filter(
+    (provider): provider is OAuthProvider =>
+      provider === "google" || provider === "microsoft"
+  );
+}
+
+// startOAuthLogin inicia el flujo federado sin enviar credenciales del proveedor al navegador.
+export function startOAuthLogin(provider: OAuthProvider) {
+  window.location.assign(`${AUTH_URL}/auth/oauth/${provider}/start`);
+}
+
+// completeOAuthLogin canjea el código efímero y conserva los JWT locales como el login habitual.
+export async function completeOAuthLogin(code: string) {
+  const response = await fetch(`${AUTH_URL}/auth/oauth/exchange`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) return response;
+
+  const session = (await response.json()) as AuthSession;
+  storeSession({ token: session.token, refreshToken: session.refreshToken });
+  return apiFetch("/auth/me");
+}
+
+// refreshAuthenticatedUser obtiene permisos actualizados del servidor tras una aprobación administrativa.
+export async function refreshAuthenticatedUser(): Promise<AuthUser | null> {
+  const session = readSession();
+  if (!session) return null;
+
+  let renewedSession: StoredSession | null;
+  try {
+    renewedSession = await refreshAccessToken(session);
+  } catch {
+    renewedSession = null;
+  }
+  if (!renewedSession) return null;
+
+  const response = await apiFetch("/auth/me");
+  if (!response.ok) return null;
+  return (await response.json()) as AuthUser;
 }
 
 // hasStoredSession permite decidir si se debe validar una sesión al iniciar la aplicación.

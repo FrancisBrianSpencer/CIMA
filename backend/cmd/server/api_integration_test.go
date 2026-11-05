@@ -50,9 +50,18 @@ func TestAPIIntegration(t *testing.T) {
 	residentCollection := client.Database(databaseName).Collection("residents")
 	roomCollection := client.Database(databaseName).Collection("rooms")
 	userCollection := client.Database(databaseName).Collection("users")
+	billingCollection := client.Database(databaseName).Collection("billing_entries")
+	installmentCollection := client.Database(databaseName).Collection("installment_plans")
+	taxDraftCollection := client.Database(databaseName).Collection("tax_document_drafts")
+	reconciliationCollection := client.Database(databaseName).Collection("reconciliation_batches")
 	username := fmt.Sprintf("integracion-%s", primitive.NewObjectID().Hex())
 	residentID := primitive.NilObjectID
 	roomID := primitive.NilObjectID
+	secondRoomID := primitive.NilObjectID
+	planID := primitive.NilObjectID
+	taxDraftID := primitive.NilObjectID
+	paymentID := primitive.NilObjectID
+	reconciliationID := primitive.NilObjectID
 	t.Cleanup(func() {
 		cleanupContext, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
@@ -64,6 +73,31 @@ func TestAPIIntegration(t *testing.T) {
 		if roomID != primitive.NilObjectID {
 			if _, err := roomCollection.DeleteOne(cleanupContext, bson.M{"_id": roomID}); err != nil {
 				t.Errorf("eliminar habitación de integración: %v", err)
+			}
+		}
+		if secondRoomID != primitive.NilObjectID {
+			if _, err := roomCollection.DeleteOne(cleanupContext, bson.M{"_id": secondRoomID}); err != nil {
+				t.Errorf("eliminar segunda habitación de integración: %v", err)
+			}
+		}
+		if planID != primitive.NilObjectID {
+			if _, err := installmentCollection.DeleteOne(cleanupContext, bson.M{"_id": planID}); err != nil {
+				t.Errorf("eliminar plan de integración: %v", err)
+			}
+		}
+		if taxDraftID != primitive.NilObjectID {
+			if _, err := taxDraftCollection.DeleteOne(cleanupContext, bson.M{"_id": taxDraftID}); err != nil {
+				t.Errorf("eliminar borrador tributario de integración: %v", err)
+			}
+		}
+		if paymentID != primitive.NilObjectID {
+			if _, err := billingCollection.DeleteOne(cleanupContext, bson.M{"_id": paymentID}); err != nil {
+				t.Errorf("eliminar pago simulado de integración: %v", err)
+			}
+		}
+		if reconciliationID != primitive.NilObjectID {
+			if _, err := reconciliationCollection.DeleteOne(cleanupContext, bson.M{"_id": reconciliationID}); err != nil {
+				t.Errorf("eliminar conciliación de integración: %v", err)
 			}
 		}
 		if _, err := userCollection.DeleteOne(cleanupContext, bson.M{"username": username}); err != nil {
@@ -98,6 +132,22 @@ func TestAPIIntegration(t *testing.T) {
 		t.Errorf("código de habitación duplicado = %d, se esperaba 409", status)
 	}
 
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/rooms/", adminToken, RoomCreate{
+		Code:     "prueba-a102",
+		Capacity: 1,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("crear segunda habitación con código distinto = %d, se esperaba 201: %s", status, body)
+	}
+	var secondRoom Room
+	if err := json.Unmarshal(body, &secondRoom); err != nil {
+		t.Fatalf("decodificar segunda habitación: %v", err)
+	}
+	secondRoomID = secondRoom.ID
+	if secondRoom.Code != "PRUEBA-A102" {
+		t.Fatalf("código enviado PRUEBA-A102 terminó como %q", secondRoom.Code)
+	}
+
 	roomPath := "/api/v1/rooms/" + room.ID.Hex()
 	status, _ = integrationRequest(t, httpClient, apiURL, http.MethodGet, roomPath, adminToken, nil)
 	if status != http.StatusOK {
@@ -121,7 +171,7 @@ func TestAPIIntegration(t *testing.T) {
 		t.Fatalf("consulta anónima de residentes = %d, se esperaba 401", status)
 	}
 
-	status, body := integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/residents/", adminToken, map[string]string{
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/residents/", adminToken, map[string]string{
 		"firstName": "Residente",
 		"lastName":  "Integración",
 	})
@@ -135,6 +185,102 @@ func TestAPIIntegration(t *testing.T) {
 	residentID, err = primitive.ObjectIDFromHex(resident.ID)
 	if err != nil {
 		t.Fatalf("ID de residente no es ObjectID: %q", resident.ID)
+	}
+
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/billing/installment-plans", adminToken, InstallmentPlanCreate{
+		ResidentID:       resident.ID,
+		Description:      "Cuotas de integración",
+		TotalAmountCLP:   10000,
+		InstallmentCount: 3,
+		FirstDueDate:     "2026-11-30",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("crear cuotas = %d, se esperaba 201: %s", status, body)
+	}
+	var installmentPlan InstallmentPlan
+	if err := json.Unmarshal(body, &installmentPlan); err != nil {
+		t.Fatalf("decodificar plan de cuotas: %v", err)
+	}
+	planID = installmentPlan.ID
+	if len(installmentPlan.Installments) != 3 || installmentPlan.Installments[2].AmountCLP != 3334 {
+		t.Fatalf("plan de cuotas = %+v, se esperaban tres cuotas con residuo en la última", installmentPlan)
+	}
+
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/billing/tax-document-drafts", adminToken, TaxDocumentDraftCreate{
+		ResidentID:   resident.ID,
+		DocumentType: "boleta",
+		Description:  "Borrador de integración",
+		AmountCLP:    10000,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("crear borrador no fiscal = %d, se esperaba 201: %s", status, body)
+	}
+	var taxDraft TaxDocumentDraft
+	if err := json.Unmarshal(body, &taxDraft); err != nil {
+		t.Fatalf("decodificar borrador: %v", err)
+	}
+	taxDraftID = taxDraft.ID
+	if taxDraft.FiscalValidity != "not_valid_for_tax_use" {
+		t.Fatalf("FiscalValidity = %q, se esperaba borrador no fiscal", taxDraft.FiscalValidity)
+	}
+
+	mockPayment := MockPaymentRequest{
+		ResidentID:     resident.ID,
+		Description:    "Pago local de prueba",
+		AmountCLP:      2500,
+		IdempotencyKey: "integration-payment-key-1",
+	}
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/billing/mock-payments", adminToken, mockPayment)
+	if status != http.StatusCreated {
+		t.Fatalf("pago mock = %d, se esperaba 201: %s", status, body)
+	}
+	var mockResult MockPaymentResult
+	if err := json.Unmarshal(body, &mockResult); err != nil {
+		t.Fatalf("decodificar resultado mock: %v", err)
+	}
+	paymentID = mockResult.Entry.ID
+	if !mockResult.Simulated || !mockResult.Entry.Simulated || mockResult.Entry.PaymentProvider != "local-mock" {
+		t.Fatalf("resultado de pago no indica simulación explícita: %+v", mockResult)
+	}
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/billing/mock-payments", adminToken, mockPayment)
+	if status != http.StatusOK {
+		t.Fatalf("reintento idempotente = %d, se esperaba 200: %s", status, body)
+	}
+	var retryResult MockPaymentResult
+	if err := json.Unmarshal(body, &retryResult); err != nil || retryResult.Entry.ID != paymentID {
+		t.Fatalf("reintento creó otro pago o respuesta inválida: %+v, err=%v", retryResult, err)
+	}
+	conflictingPayment := mockPayment
+	conflictingPayment.AmountCLP++
+	status, _ = integrationRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/billing/mock-payments", adminToken, conflictingPayment)
+	if status != http.StatusConflict {
+		t.Fatalf("reuso de clave idempotente con otros datos = %d, se esperaba 409", status)
+	}
+
+	status, body = integrationRequest(t, httpClient, apiURL, http.MethodGet, "/api/v1/billing/summary?residentId="+resident.ID, adminToken, nil)
+	if status != http.StatusOK {
+		t.Fatalf("consultar saldo tras plan y pago = %d: %s", status, body)
+	}
+	var billingSummary BillingSummary
+	if err := json.Unmarshal(body, &billingSummary); err != nil {
+		t.Fatalf("decodificar saldo: %v", err)
+	}
+	if billingSummary.ChargesCLP != 10000 || billingSummary.PaymentsCLP != 2500 || billingSummary.BalanceCLP != 7500 {
+		t.Fatalf("saldo = %+v, se esperaba cargos 10000, pagos 2500, saldo 7500", billingSummary)
+	}
+
+	csvBody := "date,amount_clp,reference,description\n2026-10-30,2500," + mockResult.Entry.Reference + ",pago sintetico\n"
+	status, body = integrationRawRequest(t, httpClient, apiURL, http.MethodPost, "/api/v1/billing/reconciliation/import", adminToken, "text/csv", csvBody)
+	if status != http.StatusCreated {
+		t.Fatalf("importar conciliación sintética = %d: %s", status, body)
+	}
+	var batch ReconciliationBatch
+	if err := json.Unmarshal(body, &batch); err != nil {
+		t.Fatalf("decodificar conciliación: %v", err)
+	}
+	reconciliationID = batch.ID
+	if len(batch.Rows) != 1 || batch.Rows[0].Status != "matched" || batch.Rows[0].MatchedBillingEntryID == nil {
+		t.Fatalf("fila conciliada = %+v, se esperaba coincidencia con el pago mock", batch.Rows)
 	}
 
 	status, body = integrationRequest(t, httpClient, apiURL, http.MethodPatch, "/api/v1/residents/"+resident.ID, adminToken, map[string]string{
@@ -280,6 +426,29 @@ func integrationRequest(t *testing.T, client *http.Client, apiURL, method, path,
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatalf("leer respuesta %s %s: %v", method, path, err)
+	}
+	return response.StatusCode, body
+}
+
+// integrationRawRequest envía datos CSV sintéticos para probar rutas que no usan JSON.
+func integrationRawRequest(t *testing.T, client *http.Client, apiURL, method, path, token, contentType, payload string) (int, []byte) {
+	t.Helper()
+	request, err := http.NewRequest(method, apiURL+path, strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("crear solicitud raw %s %s: %v", method, path, err)
+	}
+	request.Header.Set("Content-Type", contentType)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("enviar solicitud raw %s %s: %v", method, path, err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("leer respuesta raw %s %s: %v", method, path, err)
 	}
 	return response.StatusCode, body
 }

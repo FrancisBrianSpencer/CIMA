@@ -25,12 +25,12 @@ import (
 // Resident representa un residente de la residencia de adultos mayores.
 // Los datos básicos permiten identificar y gestionar la persona y su estado operativo.
 type Resident struct {
-	ID        interface{} `json:"id,omitempty" bson:"_id,omitempty"`
-	FirstName string      `json:"firstName" bson:"firstName"`
-	LastName  string      `json:"lastName" bson:"lastName"`
-	Status    string      `json:"status" bson:"status"`
-	CreatedAt *time.Time  `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-	UpdatedAt *time.Time  `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	ID         interface{} `json:"id,omitempty" bson:"_id,omitempty"`
+	FirstName  string      `json:"firstName" bson:"firstName"`
+	LastName   string      `json:"lastName" bson:"lastName"`
+	Status     string      `json:"status" bson:"status"`
+	CreatedAt  *time.Time  `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time  `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
 	ArchivedAt *time.Time  `json:"archivedAt,omitempty" bson:"archivedAt,omitempty"`
 }
 
@@ -50,15 +50,15 @@ type ResidentPatch struct {
 
 // Room representa una habitación física y su disponibilidad operativa.
 type Room struct {
-	ID               primitive.ObjectID    `json:"id" bson:"_id,omitempty"`
-	Code             string                `json:"code" bson:"code"`
-	Capacity         int                   `json:"capacity" bson:"capacity"`
-	Status           string                `json:"status" bson:"status"`
-	OccupantIDs      []primitive.ObjectID  `json:"occupantIds" bson:"occupantIds"`
-	Occupancy        int                   `json:"occupancy" bson:"-"`
+	ID                primitive.ObjectID    `json:"id" bson:"_id,omitempty"`
+	Code              string                `json:"code" bson:"code"`
+	Capacity          int                   `json:"capacity" bson:"capacity"`
+	Status            string                `json:"status" bson:"status"`
+	OccupantIDs       []primitive.ObjectID  `json:"occupantIds" bson:"occupantIds,omitempty"`
+	Occupancy         int                   `json:"occupancy" bson:"-"`
 	AssignmentHistory []RoomAssignmentEvent `json:"-" bson:"assignmentHistory,omitempty"`
-	CreatedAt        *time.Time            `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
-	UpdatedAt        *time.Time            `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+	CreatedAt         *time.Time            `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt         *time.Time            `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
 }
 
 // RoomAssignmentRequest identifica al residente que se asigna o libera.
@@ -88,6 +88,103 @@ type RoomPatch struct {
 	Status   *string `json:"status"`
 }
 
+// Stay representa la estadía de un residente en una habitación durante un periodo concreto.
+type Stay struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	RoomID     primitive.ObjectID `json:"roomId" bson:"roomId"`
+	Status     string             `json:"status" bson:"status"`
+	CheckIn    *time.Time         `json:"checkIn,omitempty" bson:"checkIn,omitempty"`
+	CheckOut   *time.Time         `json:"checkOut,omitempty" bson:"checkOut,omitempty"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// StayCreate define el payload mínimo para crear una estadía vinculada a un residente y una habitación.
+type StayCreate struct {
+	ResidentID string `json:"residentId"`
+	RoomID     string `json:"roomId"`
+	Status     string `json:"status"`
+	CheckIn    string `json:"checkIn"`
+	CheckOut   string `json:"checkOut"`
+	Notes      string `json:"notes"`
+}
+
+// StayPatch permite ajustar parcialmente la estadía y el periodo vinculado.
+type StayPatch struct {
+	Status   *string `json:"status"`
+	CheckIn  *string `json:"checkIn"`
+	CheckOut *string `json:"checkOut"`
+	Notes    *string `json:"notes"`
+}
+
+// ClinicalNote registra la evolución clínica de un residente para la atención diaria.
+type ClinicalNote struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	Summary    string             `json:"summary" bson:"summary"`
+	Severity   string             `json:"severity" bson:"severity"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy  string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// ClinicalNoteCreate define el payload mínimo para crear una nota clínica.
+type ClinicalNoteCreate struct {
+	ResidentID string `json:"residentId"`
+	Summary    string `json:"summary"`
+	Severity   string `json:"severity"`
+	Notes      string `json:"notes"`
+}
+
+// MedicationEvent representa la administración o registro de un medicamento para un residente.
+type MedicationEvent struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	Medication string             `json:"medication" bson:"medication"`
+	Dose       string             `json:"dose" bson:"dose"`
+	Schedule   string             `json:"schedule,omitempty" bson:"schedule,omitempty"`
+	Status     string             `json:"status" bson:"status"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy  string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// MedicationEventCreate define el payload mínimo para registrar una administración o evento de medicación.
+type MedicationEventCreate struct {
+	ResidentID string `json:"residentId"`
+	Medication string `json:"medication"`
+	Dose       string `json:"dose"`
+	Schedule   string `json:"schedule"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+}
+
+// DietPlan representa la planificación de la alimentación para un residente en un turno concreto.
+type DietPlan struct {
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	ResidentID primitive.ObjectID `json:"residentId" bson:"residentId"`
+	MealType   string             `json:"mealType" bson:"mealType"`
+	Menu       string             `json:"menu" bson:"menu"`
+	Status     string             `json:"status" bson:"status"`
+	Notes      string             `json:"notes,omitempty" bson:"notes,omitempty"`
+	CreatedBy  string             `json:"createdBy" bson:"createdBy"`
+	CreatedAt  *time.Time         `json:"createdAt,omitempty" bson:"createdAt,omitempty"`
+	UpdatedAt  *time.Time         `json:"updatedAt,omitempty" bson:"updatedAt,omitempty"`
+}
+
+// DietPlanCreate define el payload mínimo para registrar una comida o dieta personalizada.
+type DietPlanCreate struct {
+	ResidentID string `json:"residentId"`
+	MealType   string `json:"mealType"`
+	Menu       string `json:"menu"`
+	Status     string `json:"status"`
+	Notes      string `json:"notes"`
+}
+
 type ResidentContact struct {
 	Name         string `json:"name,omitempty" bson:"name,omitempty"`
 	Relationship string `json:"relationship,omitempty" bson:"relationship,omitempty"`
@@ -96,10 +193,10 @@ type ResidentContact struct {
 }
 
 type ResidentProfile struct {
-	DateOfBirth    string          `json:"dateOfBirth,omitempty" bson:"dateOfBirth,omitempty"`
-	Phone          string          `json:"phone,omitempty" bson:"phone,omitempty"`
-	Email          string          `json:"email,omitempty" bson:"email,omitempty"`
-	PrimaryContact ResidentContact `json:"primaryContact" bson:"primaryContact"`
+	DateOfBirth      string          `json:"dateOfBirth,omitempty" bson:"dateOfBirth,omitempty"`
+	Phone            string          `json:"phone,omitempty" bson:"phone,omitempty"`
+	Email            string          `json:"email,omitempty" bson:"email,omitempty"`
+	PrimaryContact   ResidentContact `json:"primaryContact" bson:"primaryContact"`
 	EmergencyContact ResidentContact `json:"emergencyContact" bson:"emergencyContact"`
 }
 
@@ -123,6 +220,8 @@ type ProfilePatch struct {
 type User struct {
 	ID           interface{} `json:"id,omitempty" bson:"_id,omitempty"`
 	Username     string      `json:"username" bson:"username"`
+	DisplayName  string      `json:"displayName,omitempty" bson:"displayName,omitempty"`
+	Email        string      `json:"email,omitempty" bson:"email,omitempty"`
 	PasswordHash string      `json:"-" bson:"passwordHash"`
 	Role         string      `json:"role" bson:"role"`
 	Permissions  []string    `json:"permissions,omitempty" bson:"permissions,omitempty"`
@@ -141,14 +240,16 @@ type AuthRefreshRequest struct {
 
 type authUserResponse struct {
 	Username    string   `json:"username"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Email       string   `json:"email,omitempty"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions,omitempty"`
 }
 
 type authSessionResponse struct {
-	Token        string             `json:"token"`
-	RefreshToken string            `json:"refreshToken"`
-	User         authUserResponse   `json:"user"`
+	Token        string           `json:"token"`
+	RefreshToken string           `json:"refreshToken"`
+	User         authUserResponse `json:"user"`
 }
 
 type jwtClaims struct {
@@ -160,6 +261,7 @@ type jwtClaims struct {
 // rolePermissions define los permisos base para cada rol del sistema.
 // Estos permisos sirven como base de control para la residencia y los módulos operativos.
 var rolePermissions = map[string][]string{
+	"pending": {},
 	"admin": {
 		"resident.read",
 		"resident.create",
@@ -169,6 +271,8 @@ var rolePermissions = map[string][]string{
 		"user.write",
 		"room.read",
 		"room.write",
+		"stay.read",
+		"stay.write",
 		"medical.read",
 		"medical.write",
 		"medication.read",
@@ -188,6 +292,8 @@ var rolePermissions = map[string][]string{
 		"user.read",
 		"room.read",
 		"room.write",
+		"stay.read",
+		"stay.write",
 		"medical.read",
 		"billing.read",
 		"audit.read",
@@ -212,6 +318,8 @@ var rolePermissions = map[string][]string{
 		"resident.update",
 		"room.read",
 		"room.write",
+		"stay.read",
+		"stay.write",
 	},
 	"accounting": {
 		"resident.read",
@@ -231,15 +339,20 @@ type UserCreateRequest struct {
 
 // UserUpdateRequest permite cambiar el rol o los permisos de un usuario existente.
 type UserUpdateRequest struct {
-	Role        *string  `json:"role,omitempty"`
+	Role        *string   `json:"role,omitempty"`
 	Permissions *[]string `json:"permissions,omitempty"`
-	Password    *string  `json:"password,omitempty"`
+	Password    *string   `json:"password,omitempty"`
 }
 
 func main() {
+	_ = jwtSecretValue()
 	port := getenv("APP_PORT", "8080")
 	mongoURI := getenv("MONGO_URI", "mongodb://mongodb:27017")
 	dbName := getenv("MONGO_DATABASE", "cima")
+	paymentMode := strings.ToLower(strings.TrimSpace(getenv("PAYMENT_MODE", "mock")))
+	if paymentMode != "mock" {
+		log.Fatal("PAYMENT_MODE must be mock; real payment providers are not enabled in this experimental build.")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -264,20 +377,145 @@ func main() {
 	}); err != nil {
 		log.Fatalf("create room code index: %v", err)
 	}
-	if _, err := roomCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "occupantIds", Value: 1}},
-		Options: options.Index().SetUnique(true).SetSparse(true),
-	}); err != nil {
+	if err := ensureRoomOccupantIndex(ctx, roomCollection); err != nil {
 		log.Fatalf("create unique room occupant index: %v", err)
 	}
-	if _, err := roomCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "occupantIds", Value: 1}},
+	stayCollection := client.Database(dbName).Collection("stays")
+	if _, err := stayCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create stay resident index: %v", err)
+	}
+	if _, err := stayCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "roomId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create stay room index: %v", err)
+	}
+	if _, err := stayCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create stay status index: %v", err)
+	}
+	clinicalNoteCollection := client.Database(dbName).Collection("clinical_notes")
+	if _, err := clinicalNoteCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create clinical note resident index: %v", err)
+	}
+	medicationEventCollection := client.Database(dbName).Collection("medication_events")
+	if _, err := medicationEventCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create medication event resident index: %v", err)
+	}
+	if _, err := medicationEventCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create medication event status index: %v", err)
+	}
+	dietPlanCollection := client.Database(dbName).Collection("diet_plans")
+	if _, err := dietPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create diet plan resident index: %v", err)
+	}
+	if _, err := dietPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "mealType", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create diet plan meal type index: %v", err)
+	}
+	if _, err := dietPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "status", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create diet plan status index: %v", err)
+	}
+	billingCollection := client.Database(dbName).Collection("billing_entries")
+	if _, err := billingCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create billing resident index: %v", err)
+	}
+	if _, err := billingCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "providerReference", Value: 1}},
 		Options: options.Index().SetUnique(true).SetSparse(true),
 	}); err != nil {
-		log.Fatalf("create unique room occupant index: %v", err)
+		log.Fatalf("create billing provider reference index: %v", err)
+	}
+	installmentPlanCollection := client.Database(dbName).Collection("installment_plans")
+	if _, err := installmentPlanCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create installment plan resident index: %v", err)
+	}
+	taxDraftCollection := client.Database(dbName).Collection("tax_document_drafts")
+	if _, err := taxDraftCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create tax draft resident index: %v", err)
+	}
+	reconciliationCollection := client.Database(dbName).Collection("reconciliation_batches")
+	if _, err := reconciliationCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create reconciliation batch date index: %v", err)
+	}
+	documentCollection := client.Database(dbName).Collection("private_documents")
+	if _, err := documentCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "residentId", Value: 1}, {Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create private document resident index: %v", err)
+	}
+	auditCollection := client.Database(dbName).Collection("audit_events")
+	if _, err := auditCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "createdAt", Value: -1}},
+	}); err != nil {
+		log.Fatalf("create audit event date index: %v", err)
+	}
+	if _, err := auditCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "actor", Value: 1}, {Key: "resource", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create audit event actor/resource index: %v", err)
 	}
 	// userCollection guarda usuarios, roles y permisos para la autenticación del sistema.
 	userCollection := client.Database(dbName).Collection("users")
+	oauthIdentityCollection := client.Database(dbName).Collection("user_oauth_identities")
+	if _, err := oauthIdentityCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "provider", Value: 1}, {Key: "providerUserId", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		log.Fatalf("create oauth identity provider index: %v", err)
+	}
+	if _, err := oauthIdentityCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "userId", Value: 1}},
+	}); err != nil {
+		log.Fatalf("create oauth identity user index: %v", err)
+	}
+	oauthFlowCollection := client.Database(dbName).Collection("oauth_flows")
+	if _, err := oauthFlowCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "stateHash", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		log.Fatalf("create oauth state index: %v", err)
+	}
+	if _, err := oauthFlowCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}); err != nil {
+		log.Fatalf("create oauth state expiry index: %v", err)
+	}
+	oauthLoginCodeCollection := client.Database(dbName).Collection("oauth_login_codes")
+	if _, err := oauthLoginCodeCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "codeHash", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}); err != nil {
+		log.Fatalf("create oauth login code index: %v", err)
+	}
+	if _, err := oauthLoginCodeCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
+		Options: options.Index().SetExpireAfterSeconds(0),
+	}); err != nil {
+		log.Fatalf("create oauth login code expiry index: %v", err)
+	}
 	if err := seedDefaultAdminUser(context.Background(), userCollection); err != nil {
 		log.Fatalf("seed admin user: %v", err)
 	}
@@ -285,13 +523,17 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Use(corsMiddleware(getenv("CORS_ORIGIN", "http://localhost:5173")))
+	r.Use(secureHeadersMiddleware)
+	r.Use(requestBodyLimitMiddleware(13 << 20))
+	r.Use(auditSuccessfulMutations(auditCollection))
+	r.Use(newRequestRateLimiter(240, time.Minute).Middleware)
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	r.Route("/auth", func(r chi.Router) {
-		r.Post("/login", func(w http.ResponseWriter, req *http.Request) {
+		r.With(newRequestRateLimiter(20, 15*time.Minute).Middleware).Post("/login", func(w http.ResponseWriter, req *http.Request) {
 			var input AuthLoginRequest
 			if !decodeStrictJSON(w, req, &input) {
 				return
@@ -319,7 +561,7 @@ func main() {
 				return
 			}
 
-			jwtSecret := getenv("JWT_SECRET", "change-this-development-secret")
+			jwtSecret := jwtSecretValue()
 			accessToken, err := issueJWT(user.Username, user.Role, user.Permissions, jwtSecret, 15*time.Minute)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo generar el token de acceso."})
@@ -336,6 +578,8 @@ func main() {
 				RefreshToken: refreshToken,
 				User: authUserResponse{
 					Username:    user.Username,
+					DisplayName: user.DisplayName,
+					Email:       user.Email,
 					Role:        user.Role,
 					Permissions: user.Permissions,
 				},
@@ -352,7 +596,7 @@ func main() {
 				return
 			}
 
-			claims, err := parseJWT(input.RefreshToken, getenv("JWT_SECRET", "change-this-development-secret"))
+			claims, err := parseJWT(input.RefreshToken, jwtSecretValue())
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "El token de renovación no es válido."})
 				return
@@ -370,7 +614,7 @@ func main() {
 				return
 			}
 
-			newAccessToken, err := issueJWT(user.Username, user.Role, user.Permissions, getenv("JWT_SECRET", "change-this-development-secret"), 15*time.Minute)
+			newAccessToken, err := issueJWT(user.Username, user.Role, user.Permissions, jwtSecretValue(), 15*time.Minute)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo generar el token de acceso."})
 				return
@@ -384,7 +628,7 @@ func main() {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Falta el token de acceso."})
 				return
 			}
-			claims, err := parseJWT(token, getenv("JWT_SECRET", "change-this-development-secret"))
+			claims, err := parseJWT(token, jwtSecretValue())
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "El token no es válido."})
 				return
@@ -404,11 +648,14 @@ func main() {
 
 			writeJSON(w, http.StatusOK, authUserResponse{
 				Username:    user.Username,
+				DisplayName: user.DisplayName,
+				Email:       user.Email,
 				Role:        user.Role,
 				Permissions: user.Permissions,
 			})
 		})
 	})
+	registerOAuthRoutes(r, userCollection, oauthIdentityCollection, oauthFlowCollection, oauthLoginCodeCollection)
 
 	r.Route("/api/v1/users", func(r chi.Router) {
 		r.With(requirePermission("user.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
@@ -594,32 +841,75 @@ func main() {
 	})
 
 	r.Route("/api/v1/dashboard", func(r chi.Router) {
-			r.With(requirePermission("dashboard.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-				writeJSON(w, http.StatusOK, map[string]string{"status": "Panel disponible", "module": "crm-dashboard"})
+		r.With(requirePermission("dashboard.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "Panel disponible", "module": "crm-dashboard"})
 		})
 	})
 
-	r.Route("/api/v1/audit", func(r chi.Router) {
-		r.With(requirePermission("audit.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de auditoría disponible"})
-		})
-	})
+	registerModuleRoutes(r, collection, billingCollection, documentCollection, auditCollection, installmentPlanCollection, taxDraftCollection, reconciliationCollection, getenv("CLAMAV_ADDRESS", "clamav:3310"), paymentMode)
 
-	r.Route("/api/v1/documents", func(r chi.Router) {
-		r.With(requirePermission("document.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de documentos disponible"})
-		})
-		r.With(requirePermission("document.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de documentos aún no está implementado."})
-		})
-	})
+	r.Route("/api/v1/diet-plans", func(r chi.Router) {
+		r.With(requirePermission("diet.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
 
-	r.Route("/api/v1/billing", func(r chi.Router) {
-		r.With(requirePermission("billing.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de facturación disponible"})
+			cursor, err := dietPlanCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar las dietas."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			plans := make([]DietPlan, 0)
+			if err := cursor.All(ctx, &plans); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar las dietas."})
+				return
+			}
+			writeJSON(w, http.StatusOK, plans)
 		})
-		r.With(requirePermission("billing.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de facturación aún no está implementado."})
+		r.With(requirePermission("food.update")).Post("/", func(w http.ResponseWriter, req *http.Request) {
+			var input DietPlanCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+
+			plan, validationErr := validateDietPlanCreate(input)
+			if validationErr != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationErr})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+
+			now := time.Now().UTC()
+			plan.ResidentID = residentID
+			plan.CreatedBy = requestUsername(req)
+			plan.CreatedAt = &now
+			plan.UpdatedAt = &now
+
+			result, err := dietPlanCollection.InsertOne(ctx, plan)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo guardar la dieta."})
+				return
+			}
+			plan.ID = result.InsertedID.(primitive.ObjectID)
+			writeJSON(w, http.StatusCreated, plan)
 		})
 	})
 
@@ -724,8 +1014,8 @@ func main() {
 				filter,
 				bson.M{
 					"$addToSet": bson.M{"occupantIds": residentID},
-					"$push":    bson.M{"assignmentHistory": event},
-					"$set":     bson.M{"updatedAt": now},
+					"$push":     bson.M{"assignmentHistory": event},
+					"$set":      bson.M{"updatedAt": now},
 				},
 				options.FindOneAndUpdate().SetReturnDocument(options.After),
 			).Decode(&room)
@@ -829,13 +1119,17 @@ func main() {
 			now := time.Now().UTC()
 			room.CreatedAt = &now
 			room.UpdatedAt = &now
-			room.OccupantIDs = []primitive.ObjectID{}
+			room.OccupantIDs = nil
 
 			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
 			defer cancel()
 			result, err := roomCollection.InsertOne(ctx, room)
-			if mongo.IsDuplicateKeyError(err) {
+			if isDuplicateKeyForIndex(err, "code_1") {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "Ya existe una habitación con ese código."})
+				return
+			}
+			if isDuplicateKeyForIndex(err, "occupantIds_1") {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "Un residente ya está asignado a otra habitación."})
 				return
 			}
 			if err != nil {
@@ -909,7 +1203,7 @@ func main() {
 				bson.M{"$set": updates},
 				options.FindOneAndUpdate().SetReturnDocument(options.After),
 			).Decode(&room)
-			if mongo.IsDuplicateKeyError(err) {
+			if isDuplicateKeyForIndex(err, "code_1") {
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "Ya existe una habitación con ese código."})
 				return
 			}
@@ -931,21 +1225,368 @@ func main() {
 		})
 	})
 
+	r.Route("/api/v1/stays", func(r chi.Router) {
+		r.With(requirePermission("stay.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := stayCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar las estadías."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			stays := make([]Stay, 0)
+			if err := cursor.All(ctx, &stays); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar las estadías."})
+				return
+			}
+			writeJSON(w, http.StatusOK, stays)
+		})
+
+		r.With(requirePermission("stay.read")).Get("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			stayID, err := primitive.ObjectIDFromHex(chi.URLParam(req, "id"))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador de la estadía no es válido."})
+				return
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var stay Stay
+			if err := stayCollection.FindOne(ctx, bson.M{"_id": stayID}).Decode(&stay); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la estadía."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar la estadía."})
+				return
+			}
+			writeJSON(w, http.StatusOK, stay)
+		})
+
+		r.With(requirePermission("stay.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
+			var input StayCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+			stay, validationError := validateStayCreate(input)
+			if validationError != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+			roomID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.RoomID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador de la habitación no es válido."})
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+			if resident.Status != "active" {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "Solo se pueden crear estadías para residentes activos."})
+				return
+			}
+
+			var room Room
+			if err := roomCollection.FindOne(ctx, bson.M{"_id": roomID}).Decode(&room); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la habitación."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar la habitación."})
+				return
+			}
+			if room.Status == "maintenance" || room.Status == "closed" {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "La habitación no está disponible para una nueva estadía."})
+				return
+			}
+
+			if stay.Status == "active" {
+				var active Stay
+				if err := stayCollection.FindOne(ctx, bson.M{"residentId": residentID, "status": "active"}).Decode(&active); err == nil {
+					writeJSON(w, http.StatusConflict, map[string]string{"error": "El residente ya tiene una estadía activa."})
+					return
+				} else if err != mongo.ErrNoDocuments {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo verificar la estadía activa."})
+					return
+				}
+			}
+
+			now := time.Now().UTC()
+			stay.ResidentID = residentID
+			stay.RoomID = roomID
+			stay.CreatedAt = &now
+			stay.UpdatedAt = &now
+
+			result, err := stayCollection.InsertOne(ctx, stay)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo crear la estadía."})
+				return
+			}
+			stay.ID = result.InsertedID.(primitive.ObjectID)
+			if stay.Status == "active" {
+				_, err = roomCollection.UpdateOne(ctx, bson.M{"_id": roomID}, bson.M{
+					"$addToSet": bson.M{"occupantIds": residentID},
+					"$set":      bson.M{"updatedAt": now},
+				})
+				if err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo asociar al residente a la habitación."})
+					return
+				}
+			}
+			writeJSON(w, http.StatusCreated, stay)
+		})
+
+		r.With(requirePermission("stay.write")).Patch("/{id}", func(w http.ResponseWriter, req *http.Request) {
+			stayID, err := primitive.ObjectIDFromHex(chi.URLParam(req, "id"))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador de la estadía no es válido."})
+				return
+			}
+			var patch StayPatch
+			if !decodeStrictJSON(w, req, &patch) {
+				return
+			}
+
+			updates := bson.M{}
+			if patch.Status != nil {
+				status := normalizeStayStatus(*patch.Status)
+				if !validStayStatus(status) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El estado debe ser planned, active o completed."})
+					return
+				}
+				updates["status"] = status
+			}
+			if patch.CheckIn != nil {
+				value, parseErr := parseStayDate("checkIn", *patch.CheckIn)
+				if parseErr != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+					return
+				}
+				updates["checkIn"] = value
+			}
+			if patch.CheckOut != nil {
+				value, parseErr := parseStayDate("checkOut", *patch.CheckOut)
+				if parseErr != nil {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+					return
+				}
+				updates["checkOut"] = value
+			}
+			if patch.Notes != nil {
+				updates["notes"] = strings.TrimSpace(*patch.Notes)
+			}
+			if len(updates) == 0 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Debes indicar al menos un dato de la estadía."})
+				return
+			}
+			updates["updatedAt"] = time.Now().UTC()
+
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var current Stay
+			if err := stayCollection.FindOne(ctx, bson.M{"_id": stayID}).Decode(&current); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la estadía."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar la estadía."})
+				return
+			}
+
+			if patch.CheckIn != nil || patch.CheckOut != nil {
+				candidateCheckIn := current.CheckIn
+				candidateCheckOut := current.CheckOut
+				if patch.CheckIn != nil {
+					parsed, parseErr := parseStayDate("checkIn", *patch.CheckIn)
+					if parseErr != nil {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+						return
+					}
+					candidateCheckIn = parsed
+				}
+				if patch.CheckOut != nil {
+					parsed, parseErr := parseStayDate("checkOut", *patch.CheckOut)
+					if parseErr != nil {
+						writeJSON(w, http.StatusBadRequest, map[string]string{"error": parseErr.Error()})
+						return
+					}
+					candidateCheckOut = parsed
+				}
+				if candidateCheckIn != nil && candidateCheckOut != nil && candidateCheckOut.Before(*candidateCheckIn) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "La fecha de salida no puede ser anterior a la de ingreso."})
+					return
+				}
+			}
+
+			if updates["status"] != nil && updates["status"] == "completed" {
+				if current.CheckOut == nil {
+					now := time.Now().UTC()
+					updates["checkOut"] = &now
+				}
+				_, _ = roomCollection.UpdateOne(ctx, bson.M{"_id": current.RoomID}, bson.M{"$pull": bson.M{"occupantIds": current.ResidentID}})
+			}
+			if updates["status"] != nil && updates["status"] == "active" {
+				_, _ = roomCollection.UpdateOne(ctx, bson.M{"_id": current.RoomID}, bson.M{"$addToSet": bson.M{"occupantIds": current.ResidentID}})
+			}
+
+			var stay Stay
+			err = stayCollection.FindOneAndUpdate(
+				ctx,
+				bson.M{"_id": stayID},
+				bson.M{"$set": updates},
+				options.FindOneAndUpdate().SetReturnDocument(options.After),
+			).Decode(&stay)
+			if err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró la estadía."})
+				return
+			}
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo actualizar la estadía."})
+				return
+			}
+			writeJSON(w, http.StatusOK, stay)
+		})
+	})
+
 	r.Route("/api/v1/medical", func(r chi.Router) {
 		r.With(requirePermission("medical.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de atención clínica disponible"})
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := clinicalNoteCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar las notas clínicas."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			notes := make([]ClinicalNote, 0)
+			if err := cursor.All(ctx, &notes); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar las notas clínicas."})
+				return
+			}
+			writeJSON(w, http.StatusOK, notes)
 		})
 		r.With(requirePermission("medical.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de atención clínica aún no está implementado."})
+			var input ClinicalNoteCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+			note, validationError := validateClinicalNoteCreate(input)
+			if validationError != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+
+			now := time.Now().UTC()
+			note.ResidentID = residentID
+			note.CreatedBy = requestUsername(req)
+			note.CreatedAt = &now
+			note.UpdatedAt = &now
+
+			result, err := clinicalNoteCollection.InsertOne(ctx, note)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo guardar la nota clínica."})
+				return
+			}
+			note.ID = result.InsertedID.(primitive.ObjectID)
+			writeJSON(w, http.StatusCreated, note)
 		})
 	})
 
 	r.Route("/api/v1/medication-events", func(r chi.Router) {
 		r.With(requirePermission("medication.read")).Get("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "Módulo de medicamentos disponible"})
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			cursor, err := medicationEventCollection.Find(ctx, bson.M{})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron listar los eventos de medicamentos."})
+				return
+			}
+			defer cursor.Close(ctx)
+
+			events := make([]MedicationEvent, 0)
+			if err := cursor.All(ctx, &events); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudieron procesar los eventos de medicamentos."})
+				return
+			}
+			writeJSON(w, http.StatusOK, events)
 		})
 		r.With(requirePermission("medication.write")).Post("/", func(w http.ResponseWriter, req *http.Request) {
-			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "El módulo de medicamentos aún no está implementado."})
+			var input MedicationEventCreate
+			if !decodeStrictJSON(w, req, &input) {
+				return
+			}
+			event, validationError := validateMedicationEventCreate(input)
+			if validationError != "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": validationError})
+				return
+			}
+
+			residentID, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "El identificador del residente no es válido."})
+				return
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+			defer cancel()
+
+			var resident Resident
+			if err := collection.FindOne(ctx, bson.M{"_id": residentID}).Decode(&resident); err == mongo.ErrNoDocuments {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "No se encontró al residente."})
+				return
+			} else if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo cargar al residente."})
+				return
+			}
+
+			now := time.Now().UTC()
+			event.ResidentID = residentID
+			event.CreatedBy = requestUsername(req)
+			event.CreatedAt = &now
+			event.UpdatedAt = &now
+
+			result, err := medicationEventCollection.InsertOne(ctx, event)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No se pudo registrar el evento de medicación."})
+				return
+			}
+			event.ID = result.InsertedID.(primitive.ObjectID)
+			writeJSON(w, http.StatusCreated, event)
 		})
 	})
 
@@ -1245,7 +1886,7 @@ func requestUsername(req *http.Request) string {
 	if !ok {
 		return ""
 	}
-	claims, err := parseJWT(token, getenv("JWT_SECRET", "change-this-development-secret"))
+	claims, err := parseJWT(token, jwtSecretValue())
 	if err != nil {
 		return ""
 	}
@@ -1259,7 +1900,47 @@ func roomOccupancyExpression() bson.M {
 
 // setRoomOccupancy prepara el conteo público sin exponer los identificadores de residentes.
 func setRoomOccupancy(room *Room) {
+	if room.OccupantIDs == nil {
+		room.OccupantIDs = []primitive.ObjectID{}
+	}
 	room.Occupancy = len(room.OccupantIDs)
+}
+
+// ensureRoomOccupantIndex migrates the legacy sparse index to a partial unique index over actual resident IDs.
+func ensureRoomOccupantIndex(ctx context.Context, rooms *mongo.Collection) error {
+	cursor, err := rooms.Indexes().List(ctx)
+	if err != nil {
+		return err
+	}
+	var indexes []bson.M
+	if err := cursor.All(ctx, &indexes); err != nil {
+		_ = cursor.Close(ctx)
+		return err
+	}
+	_ = cursor.Close(ctx)
+	for _, index := range indexes {
+		name, _ := index["name"].(string)
+		if name == "occupantIds_1" {
+			if _, hasPartialFilter := index["partialFilterExpression"]; !hasPartialFilter {
+				if _, err := rooms.Indexes().DropOne(ctx, name); err != nil {
+					return err
+				}
+			}
+			break
+		}
+	}
+	_, err = rooms.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "occupantIds", Value: 1}},
+		Options: options.Index().SetUnique(true).SetPartialFilterExpression(
+			bson.M{"occupantIds": bson.M{"$type": "objectId"}},
+		),
+	})
+	return err
+}
+
+// isDuplicateKeyForIndex checks the Mongo index name before assigning a user-facing conflict message.
+func isDuplicateKeyForIndex(err error, indexName string) bool {
+	return mongo.IsDuplicateKeyError(err) && strings.Contains(err.Error(), "index: "+indexName+" ")
 }
 
 // decodeStrictJSON asegura que el cuerpo venga como un único objeto JSON y que no haya campos desconocidos.
@@ -1291,6 +1972,183 @@ func normalizeRoomCode(code string) string {
 // validRoomStatus limita los estados a los definidos para el catálogo de habitaciones.
 func validRoomStatus(status string) bool {
 	return status == "available" || status == "maintenance" || status == "closed"
+}
+
+// validStayStatus comprueba los estados operativos permitidos para una estadía.
+func validStayStatus(status string) bool {
+	return status == "planned" || status == "active" || status == "completed"
+}
+
+// normalizeStayStatus normaliza el nombre del estado para evitar diferencias de mayúsculas o espacios.
+func normalizeStayStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
+}
+
+// parseStayDate interpreta una fecha de estadía usando el formato AAAA-MM-DD.
+func parseStayDate(field, raw string) (*time.Time, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return nil, fmt.Errorf("La fecha de %s debe usar el formato AAAA-MM-DD.", field)
+	}
+	return &parsed, nil
+}
+
+// validateStayCreate normaliza y comprueba los datos de una nueva estadía.
+func validateStayCreate(input StayCreate) (Stay, string) {
+	stay := Stay{
+		Status: normalizeStayStatus(input.Status),
+		Notes:  strings.TrimSpace(input.Notes),
+	}
+	if stay.Status == "" {
+		stay.Status = "planned"
+	} else if !validStayStatus(stay.Status) {
+		return Stay{}, "El estado debe ser planned, active o completed."
+	}
+
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return Stay{}, "El identificador del residente es obligatorio."
+	}
+	if strings.TrimSpace(input.RoomID) == "" {
+		return Stay{}, "El identificador de la habitación es obligatorio."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return Stay{}, "El identificador del residente no es válido."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.RoomID)); err != nil {
+		return Stay{}, "El identificador de la habitación no es válido."
+	}
+
+	checkIn, err := parseStayDate("checkIn", input.CheckIn)
+	if err != nil {
+		return Stay{}, err.Error()
+	}
+	checkOut, err := parseStayDate("checkOut", input.CheckOut)
+	if err != nil {
+		return Stay{}, err.Error()
+	}
+	stay.CheckIn = checkIn
+	stay.CheckOut = checkOut
+	if stay.CheckIn != nil && stay.CheckOut != nil && stay.CheckOut.Before(*stay.CheckIn) {
+		return Stay{}, "La fecha de salida no puede ser anterior a la de ingreso."
+	}
+	return stay, ""
+}
+
+// validClinicalSeverity comprueba los niveles de severidad de una nota clínica.
+func validClinicalSeverity(severity string) bool {
+	return severity == "low" || severity == "normal" || severity == "high"
+}
+
+// validateClinicalNoteCreate valida el contenido mínimo de una nota clínica.
+func validateClinicalNoteCreate(input ClinicalNoteCreate) (ClinicalNote, string) {
+	note := ClinicalNote{
+		Summary:  strings.TrimSpace(input.Summary),
+		Severity: strings.ToLower(strings.TrimSpace(input.Severity)),
+		Notes:    strings.TrimSpace(input.Notes),
+	}
+	if note.Summary == "" {
+		return ClinicalNote{}, "El resumen de la nota clínica es obligatorio."
+	}
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return ClinicalNote{}, "El identificador del residente es obligatorio."
+	}
+	if note.Severity == "" {
+		note.Severity = "normal"
+	} else if !validClinicalSeverity(note.Severity) {
+		return ClinicalNote{}, "La severidad debe ser low, normal o high."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return ClinicalNote{}, "El identificador del residente no es válido."
+	}
+	return note, ""
+}
+
+// validMedicationStatus comprueba los estados de administración de un medicamento.
+func validMedicationStatus(status string) bool {
+	return status == "scheduled" || status == "given" || status == "missed" || status == "rejected"
+}
+
+// validateMedicationEventCreate valida el payload mínimo para un evento de medicación.
+func validateMedicationEventCreate(input MedicationEventCreate) (MedicationEvent, string) {
+	event := MedicationEvent{
+		Medication: strings.TrimSpace(input.Medication),
+		Dose:       strings.TrimSpace(input.Dose),
+		Schedule:   strings.TrimSpace(input.Schedule),
+		Status:     strings.ToLower(strings.TrimSpace(input.Status)),
+		Notes:      strings.TrimSpace(input.Notes),
+	}
+	if event.Medication == "" {
+		return MedicationEvent{}, "El nombre del medicamento es obligatorio."
+	}
+	if event.Dose == "" {
+		return MedicationEvent{}, "La dosis es obligatoria."
+	}
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return MedicationEvent{}, "El identificador del residente es obligatorio."
+	}
+	if event.Status == "" {
+		event.Status = "scheduled"
+	} else if !validMedicationStatus(event.Status) {
+		return MedicationEvent{}, "El estado debe ser scheduled, given, missed o rejected."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return MedicationEvent{}, "El identificador del residente no es válido."
+	}
+	return event, ""
+}
+
+// validDietMealType comprueba que el tipo de comida esté definido dentro del catálogo de alimentación.
+func validDietMealType(mealType string) bool {
+	switch strings.ToLower(strings.TrimSpace(mealType)) {
+	case "breakfast", "lunch", "dinner", "snack":
+		return true
+	default:
+		return false
+	}
+}
+
+// validDietStatus comprueba que el estado de la alimentación sea válido para cocina y atención.
+func validDietStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "planned", "served", "pending", "adjusted":
+		return true
+	default:
+		return false
+	}
+}
+
+// validateDietPlanCreate valida la planificación semanal y diaria de la alimentación de un residente.
+func validateDietPlanCreate(input DietPlanCreate) (DietPlan, string) {
+	plan := DietPlan{
+		MealType: strings.ToLower(strings.TrimSpace(input.MealType)),
+		Menu:     strings.TrimSpace(input.Menu),
+		Status:   strings.ToLower(strings.TrimSpace(input.Status)),
+		Notes:    strings.TrimSpace(input.Notes),
+	}
+	if strings.TrimSpace(input.ResidentID) == "" {
+		return DietPlan{}, "El identificador del residente es obligatorio."
+	}
+	if _, err := primitive.ObjectIDFromHex(strings.TrimSpace(input.ResidentID)); err != nil {
+		return DietPlan{}, "El identificador del residente no es válido."
+	}
+	if plan.Menu == "" {
+		return DietPlan{}, "El menú de alimentación es obligatorio."
+	}
+	if plan.MealType == "" {
+		plan.MealType = "lunch"
+	} else if !validDietMealType(plan.MealType) {
+		return DietPlan{}, "El tipo de comida debe ser breakfast, lunch, dinner o snack."
+	}
+	if plan.Status == "" {
+		plan.Status = "planned"
+	} else if !validDietStatus(plan.Status) {
+		return DietPlan{}, "El estado debe ser planned, served, pending o adjusted."
+	}
+	return plan, ""
 }
 
 // validateRoomCreate normaliza y comprueba los datos de una habitación nueva.
@@ -1466,7 +2324,7 @@ func requirePermission(permission string) func(http.Handler) http.Handler {
 				return
 			}
 
-			claims, err := parseJWT(token, getenv("JWT_SECRET", "change-this-development-secret"))
+			claims, err := parseJWT(token, jwtSecretValue())
 			if err != nil {
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "El token no es válido."})
 				return
@@ -1537,6 +2395,14 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
+func jwtSecretValue() string {
+	value := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if value == "" {
+		log.Fatal("JWT_SECRET must be configured as a non-empty environment variable.")
+	}
+	return value
+}
+
 func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1544,6 +2410,7 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 
 			if origin != "" && origin == allowedOrigin {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")

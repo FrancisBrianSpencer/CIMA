@@ -3,9 +3,14 @@ import {
   apiFetch,
   authenticate,
   clearSession,
+  completeOAuthLogin,
+  fetchOAuthProviders,
   hasPermission,
   hasStoredSession,
+  refreshAuthenticatedUser,
+  startOAuthLogin,
   type AuthUser,
+  type OAuthProvider,
 } from "./auth";
 import {
   formatDateForDisplay,
@@ -25,6 +30,15 @@ type Resident = {
   status: ResidentStatus | string;
 };
 
+type ManagedUser = {
+  id: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  role: string;
+  permissions?: string[];
+};
+
 type RoomStatus = "available" | "maintenance" | "closed";
 
 type Room = {
@@ -36,12 +50,163 @@ type Room = {
   occupantIds?: string[];
 };
 
+type RoomDisplayStatus = {
+  label: string;
+  kind: "available" | "partial" | "occupied" | "maintenance" | "closed";
+};
+
+// roomDisplayStatus comunica la disponibilidad real sin perder el estado operativo de la habitación.
+function roomDisplayStatus(room: Room): RoomDisplayStatus {
+  if (room.status === "maintenance") return { label: "En mantención", kind: "maintenance" };
+  if (room.status === "closed") return { label: "Cerrada", kind: "closed" };
+  if (room.occupancy >= room.capacity) return { label: "Ocupada", kind: "occupied" };
+  if (room.occupancy > 0) return { label: "Parcialmente ocupada", kind: "partial" };
+  return { label: "Disponible", kind: "available" };
+}
+
 type RoomAssignmentEvent = {
   residentId: string;
   action: "assigned" | "released";
   actor: string;
   changedAt: string;
 };
+
+type StayStatus = "planned" | "active" | "completed";
+
+type Stay = {
+  id: string;
+  residentId: string;
+  roomId: string;
+  status: StayStatus | string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type ClinicalNote = {
+  id: string;
+  residentId: string;
+  summary: string;
+  severity: "low" | "normal" | "high" | string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
+type MedicationEvent = {
+  id: string;
+  residentId: string;
+  medication: string;
+  dose: string;
+  schedule?: string;
+  status: "scheduled" | "given" | "missed" | "rejected" | string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
+type DietPlan = {
+  id: string;
+  residentId: string;
+  mealType: "breakfast" | "lunch" | "dinner" | "snack" | string;
+  menu: string;
+  status: "planned" | "served" | "pending" | "adjusted" | string;
+  notes?: string;
+  createdBy?: string;
+  createdAt?: string;
+};
+
+type BillingEntry = {
+  id: string;
+  residentId: string;
+  kind: "charge" | "payment";
+  description: string;
+  amountClp: number;
+  dueDate?: string;
+  paymentMethod?: string;
+  reference?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+type BillingSummary = {
+  residentId: string;
+  chargesClp: number;
+  paymentsClp: number;
+  balanceClp: number;
+};
+
+type InstallmentPlan = {
+  id: string;
+  residentId: string;
+  description: string;
+  totalAmountClp: number;
+  installmentCount: number;
+  installments: { number: number; amountClp: number; dueDate: string }[];
+  createdBy: string;
+  createdAt: string;
+};
+
+type TaxDocumentDraft = {
+  id: string;
+  residentId: string;
+  documentType: "boleta" | "factura";
+  description: string;
+  amountClp: number;
+  status: string;
+  fiscalValidity: string;
+  createdAt: string;
+};
+
+type ReconciliationBatch = {
+  id: string;
+  createdAt: string;
+  importedBy: string;
+  rows: { line: number; date: string; amountClp: number; reference: string; status: string }[];
+};
+
+type PrivateDocument = {
+  id: string;
+  residentId: string;
+  fileName: string;
+  title: string;
+  category: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedBy: string;
+  createdAt: string;
+};
+
+type AuditEvent = {
+  id: string;
+  actor: string;
+  action: string;
+  resource: string;
+  resourceId?: string;
+  statusCode: number;
+  createdAt: string;
+};
+
+type ThemeMode = "light" | "dark";
+
+// ThemeToggle cambia el tema visual sin alterar los datos ni la sesión de la cuenta.
+function ThemeToggle({ theme, onToggle }: { theme: ThemeMode; onToggle: () => void }) {
+  return (
+    <button
+      className="theme-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-label={theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+      aria-pressed={theme === "dark"}
+      title={theme === "dark" ? "Modo oscuro activado" : "Modo claro activado"}
+    >
+      <span aria-hidden="true">{theme === "dark" ? "☼" : "◐"}</span>
+      <span>{theme === "dark" ? "Claro" : "Oscuro"}</span>
+    </button>
+  );
+}
 
 type Contact = {
   name: string;
@@ -70,10 +235,14 @@ function permissionLabel(permission: string) {
     "resident.delete": "Archivar residentes",
     "room.read": "Consultar habitaciones",
     "room.write": "Gestionar habitaciones",
+    "stay.read": "Consultar estadías",
+    "stay.write": "Gestionar estadías",
     "medical.read": "Consultar atención clínica",
     "medical.write": "Registrar atención clínica",
     "medication.read": "Consultar medicamentos",
     "medication.write": "Registrar medicamentos",
+    "diet.read": "Consultar alimentación",
+    "food.update": "Registrar alimentación",
     "billing.read": "Consultar facturación",
     "billing.write": "Gestionar facturación",
     "document.read": "Consultar documentos",
@@ -121,6 +290,11 @@ function userFacingError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+// formatCLP presenta montos como pesos chilenos enteros para evitar ambigüedad de decimales.
+function formatCLP(amount: number) {
+  return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(amount);
+}
+
 // profileForDisplay mantiene la fecha de nacimiento en formato chileno dentro de la interfaz.
 function profileForDisplay(data: Partial<ResidentProfile>): ResidentProfile {
   return {
@@ -133,12 +307,80 @@ function profileForDisplay(data: Partial<ResidentProfile>): ResidentProfile {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const storedTheme = localStorage.getItem("cima.theme");
+    if (storedTheme === "light" || storedTheme === "dark") return storedTheme;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginSaving, setLoginSaving] = useState(false);
+  const [approvalRefreshing, setApprovalRefreshing] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+  const [oauthProviders, setOAuthProviders] = useState<OAuthProvider[]>([]);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [managedUserRoles, setManagedUserRoles] = useState<Record<string, string>>({});
+  const [managedUsersLoading, setManagedUsersLoading] = useState(false);
+  const [managedUsersError, setManagedUsersError] = useState("");
+  const [managedUserSaving, setManagedUserSaving] = useState("");
+  const [billingEntries, setBillingEntries] = useState<BillingEntry[]>([]);
+  const [billingSummary, setBillingSummary] = useState<BillingSummary | null>(null);
+  const [billingResidentId, setBillingResidentId] = useState("");
+  const [billingKind, setBillingKind] = useState<"charge" | "payment">("charge");
+  const [billingDescription, setBillingDescription] = useState("");
+  const [billingAmount, setBillingAmount] = useState("");
+  const [billingDueDate, setBillingDueDate] = useState("");
+  const [billingPaymentMethod, setBillingPaymentMethod] = useState("transferencia");
+  const [billingReference, setBillingReference] = useState("");
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [billingSuccess, setBillingSuccess] = useState("");
+  const [installmentPlans, setInstallmentPlans] = useState<InstallmentPlan[]>([]);
+  const [installmentDescription, setInstallmentDescription] = useState("");
+  const [installmentTotal, setInstallmentTotal] = useState("");
+  const [installmentCount, setInstallmentCount] = useState("3");
+  const [installmentFirstDueDate, setInstallmentFirstDueDate] = useState("");
+  const [installmentSaving, setInstallmentSaving] = useState(false);
+  const [installmentLoading, setInstallmentLoading] = useState(false);
+  const [installmentError, setInstallmentError] = useState("");
+  const [installmentSuccess, setInstallmentSuccess] = useState("");
+  const [taxDrafts, setTaxDrafts] = useState<TaxDocumentDraft[]>([]);
+  const [taxDraftType, setTaxDraftType] = useState<"boleta" | "factura">("boleta");
+  const [taxDraftDescription, setTaxDraftDescription] = useState("");
+  const [taxDraftAmount, setTaxDraftAmount] = useState("");
+  const [taxDraftSaving, setTaxDraftSaving] = useState(false);
+  const [taxDraftLoading, setTaxDraftLoading] = useState(false);
+  const [taxDraftError, setTaxDraftError] = useState("");
+  const [taxDraftSuccess, setTaxDraftSuccess] = useState("");
+  const [mockPaymentError, setMockPaymentError] = useState("");
+  const [mockPaymentSuccess, setMockPaymentSuccess] = useState("");
+  const [mockPaymentDescription, setMockPaymentDescription] = useState("");
+  const [mockPaymentAmount, setMockPaymentAmount] = useState("");
+  const [mockPaymentSaving, setMockPaymentSaving] = useState(false);
+  const [reconciliationFile, setReconciliationFile] = useState<File | null>(null);
+  const [reconciliationBatches, setReconciliationBatches] = useState<ReconciliationBatch[]>([]);
+  const [reconciliationLoading, setReconciliationLoading] = useState(false);
+  const [reconciliationSaving, setReconciliationSaving] = useState(false);
+  const [reconciliationError, setReconciliationError] = useState("");
+  const [privateDocuments, setPrivateDocuments] = useState<PrivateDocument[]>([]);
+  const [documentsResidentId, setDocumentsResidentId] = useState("");
+  const [documentTitle, setDocumentTitle] = useState("");
+  const [documentCategory, setDocumentCategory] = useState("other");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const [documentsError, setDocumentsError] = useState("");
+  const [documentsSuccess, setDocumentsSuccess] = useState("");
+  const [documentDownloading, setDocumentDownloading] = useState("");
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [auditActorFilter, setAuditActorFilter] = useState("");
+  const [auditResourceFilter, setAuditResourceFilter] = useState("");
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
   const [activeView, setActiveView] = useState("dashboard");
   const [dashboardStatus, setDashboardStatus] = useState("");
   const [dashboardError, setDashboardError] = useState("");
@@ -155,6 +397,47 @@ export default function App() {
   const [roomResidentSelection, setRoomResidentSelection] = useState<Record<string, string>>({});
   const [roomHistory, setRoomHistory] = useState<Record<string, RoomAssignmentEvent[]>>({});
   const [visibleRoomHistory, setVisibleRoomHistory] = useState("");
+  const [stays, setStays] = useState<Stay[]>([]);
+  const [staysLoading, setStaysLoading] = useState(false);
+  const [staysSaving, setStaysSaving] = useState(false);
+  const [stayError, setStayError] = useState("");
+  const [staySuccess, setStaySuccess] = useState("");
+  const [stayResidentId, setStayResidentId] = useState("");
+  const [stayRoomId, setStayRoomId] = useState("");
+  const [stayStatus, setStayStatus] = useState<StayStatus>("planned");
+  const [stayCheckIn, setStayCheckIn] = useState("");
+  const [stayCheckOut, setStayCheckOut] = useState("");
+  const [stayNotes, setStayNotes] = useState("");
+  const [clinicalNotes, setClinicalNotes] = useState<ClinicalNote[]>([]);
+  const [clinicalNotesLoading, setClinicalNotesLoading] = useState(false);
+  const [clinicalNotesSaving, setClinicalNotesSaving] = useState(false);
+  const [clinicalError, setClinicalError] = useState("");
+  const [clinicalSuccess, setClinicalSuccess] = useState("");
+  const [clinicalResidentId, setClinicalResidentId] = useState("");
+  const [clinicalSummary, setClinicalSummary] = useState("");
+  const [clinicalSeverity, setClinicalSeverity] = useState("normal");
+  const [clinicalNotesText, setClinicalNotesText] = useState("");
+  const [medicationEvents, setMedicationEvents] = useState<MedicationEvent[]>([]);
+  const [medicationLoading, setMedicationLoading] = useState(false);
+  const [medicationSaving, setMedicationSaving] = useState(false);
+  const [medicationError, setMedicationError] = useState("");
+  const [medicationSuccess, setMedicationSuccess] = useState("");
+  const [medicationResidentId, setMedicationResidentId] = useState("");
+  const [medicationName, setMedicationName] = useState("");
+  const [medicationDose, setMedicationDose] = useState("");
+  const [medicationSchedule, setMedicationSchedule] = useState("");
+  const [medicationStatus, setMedicationStatus] = useState("scheduled");
+  const [medicationNotes, setMedicationNotes] = useState("");
+  const [dietPlans, setDietPlans] = useState<DietPlan[]>([]);
+  const [dietPlansLoading, setDietPlansLoading] = useState(false);
+  const [dietPlansSaving, setDietPlansSaving] = useState(false);
+  const [dietPlanError, setDietPlanError] = useState("");
+  const [dietPlanSuccess, setDietPlanSuccess] = useState("");
+  const [dietPlanResidentId, setDietPlanResidentId] = useState("");
+  const [dietPlanMealType, setDietPlanMealType] = useState("lunch");
+  const [dietPlanMenu, setDietPlanMenu] = useState("");
+  const [dietPlanStatus, setDietPlanStatus] = useState("planned");
+  const [dietPlanNotes, setDietPlanNotes] = useState("");
   const [selectedResident, setSelectedResident] = useState<Resident | null>(null);
   const [profile, setProfile] = useState<ResidentProfile>(emptyProfile);
   const datePickerRef = useRef<HTMLInputElement>(null);
@@ -169,6 +452,8 @@ export default function App() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const oauthCallbackCode = useRef<string | null>(null);
+  const oauthCallbackPromise = useRef<Promise<AuthUser> | null>(null);
 
   // Estados de mensajes para feedback visual del usuario en la interfaz de gestión.
   const [error, setError] = useState("");
@@ -177,6 +462,16 @@ export default function App() {
   const [residentSuccess, setResidentSuccess] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("cima.theme", theme);
+  }, [theme]);
+
+  // toggleTheme alterna el tema persistente para que se aplique al login y a toda la aplicación.
+  function toggleTheme() {
+    setTheme((current) => current === "dark" ? "light" : "dark");
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -189,6 +484,57 @@ export default function App() {
       }
     };
     window.addEventListener("cima:session-expired", expireSession);
+
+    void fetchOAuthProviders()
+      .then((providers) => {
+        if (mounted) setOAuthProviders(providers);
+      })
+      .catch(() => {
+        if (mounted) setOAuthProviders([]);
+      });
+
+    const oauthFragment = new URLSearchParams(window.location.hash.slice(1));
+    const oauthStatus = oauthFragment.get("oauth");
+    const oauthCode = oauthStatus === "code" ? oauthFragment.get("code") : null;
+    if (oauthCode) oauthCallbackCode.current = oauthCode;
+    if (oauthStatus) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+
+    if (oauthCallbackCode.current) {
+      if (!oauthCallbackPromise.current) {
+        oauthCallbackPromise.current = completeOAuthLogin(oauthCallbackCode.current)
+          .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(await getApiError(response, "No se pudo iniciar sesión con el proveedor."));
+          }
+          return (await response.json()) as AuthUser;
+          });
+      }
+      void oauthCallbackPromise.current
+        .then((currentUser) => {
+          if (mounted) {
+            setUser(currentUser);
+            setActiveView("dashboard");
+          }
+        })
+        .catch((error: unknown) => {
+          if (mounted) setLoginError(userFacingError(error, "No se pudo completar el acceso federado."));
+        })
+        .finally(() => {
+          if (mounted) setAuthChecking(false);
+        });
+      return () => {
+        mounted = false;
+        window.removeEventListener("cima:session-expired", expireSession);
+      };
+    }
+
+    if (oauthStatus === "pending") {
+      setLoginError("Tu registro fue recibido. Un administrador debe aprobar la cuenta antes del primer acceso.");
+    } else if (oauthStatus === "error") {
+      setLoginError("No se pudo verificar la cuenta con el proveedor. Inténtalo nuevamente.");
+    }
 
     if (!hasStoredSession()) {
       setAuthChecking(false);
@@ -244,6 +590,28 @@ export default function App() {
     setActiveView("dashboard");
   }
 
+  // handleApprovalRefresh consulta los permisos actuales tras la aprobación de una cuenta federada.
+  async function handleApprovalRefresh() {
+    setApprovalError("");
+    setApprovalRefreshing(true);
+    try {
+      const currentUser = await refreshAuthenticatedUser();
+      if (!currentUser) {
+        throw new Error("No se pudo actualizar el acceso. Inicia sesión nuevamente.");
+      }
+      if (currentUser.role === "pending") {
+        setApprovalError("La cuenta todavía está pendiente de aprobación.");
+        return;
+      }
+      setUser(currentUser);
+      setActiveView("dashboard");
+    } catch (error) {
+      setApprovalError(userFacingError(error, "No se pudo comprobar la aprobación."));
+    } finally {
+      setApprovalRefreshing(false);
+    }
+  }
+
   // loadResidents consulta la lista de residentes desde la API del backend.
   const loadResidents = useCallback(async () => {
     if (!hasPermission(user, "resident.read")) {
@@ -274,6 +642,53 @@ export default function App() {
       setLoading(false);
     }
   }, [user]);
+
+  // loadManagedUsers obtiene las cuentas para que una persona administradora apruebe sus roles.
+  const loadManagedUsers = useCallback(async () => {
+    if (!hasPermission(user, "user.read")) return;
+    setManagedUsersLoading(true);
+    setManagedUsersError("");
+    try {
+      const response = await apiFetch("/users/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar los usuarios."));
+      }
+      const accounts = (await response.json()) as ManagedUser[];
+      setManagedUsers(accounts);
+      setManagedUserRoles(Object.fromEntries(accounts.map((account) => [account.id, account.role])));
+    } catch (err) {
+      setManagedUsersError(userFacingError(err, "No se pudieron cargar los usuarios."));
+    } finally {
+      setManagedUsersLoading(false);
+    }
+  }, [user]);
+
+  // handleManagedUserRoleChange guarda el rol aprobado en el backend y refresca la lista administrativa.
+  async function handleManagedUserRoleChange(event: FormEvent<HTMLFormElement>, userId: string) {
+    event.preventDefault();
+    const role = managedUserRoles[userId];
+    if (!role) return;
+    setManagedUsersError("");
+    setManagedUserSaving(userId);
+    try {
+      const response = await apiFetch(`/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo actualizar el rol."));
+      }
+      setManagedUsers((accounts) => accounts.map((account) => account.id === userId ? { ...account, role } : account));
+    } catch (err) {
+      setManagedUsersError(userFacingError(err, "No se pudo actualizar el rol."));
+    } finally {
+      setManagedUserSaving("");
+    }
+  }
+
+  useEffect(() => {
+    if (user && activeView === "users") void loadManagedUsers();
+  }, [user, activeView, loadManagedUsers]);
 
   // loadResidents solo consulta datos cuando la sesión tiene el permiso de lectura.
   useEffect(() => {
@@ -344,6 +759,582 @@ export default function App() {
       setVisibleRoomHistory(roomId);
     } catch (err) {
       setRoomError(userFacingError(err, "No se pudo cargar el historial."));
+    }
+  }
+
+  // loadStays consulta las estadías activas y registradas del sistema.
+  const loadStays = useCallback(async () => {
+    if (!hasPermission(user, "stay.read")) return;
+    setStaysLoading(true);
+    setStayError("");
+    try {
+      const response = await apiFetch("/stays/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las estadías."));
+      }
+      const data = (await response.json()) as Stay[];
+      setStays(data.sort((left, right) => (left.checkIn ?? "").localeCompare(right.checkIn ?? "")));
+    } catch (err) {
+      setStayError(userFacingError(err, "No se pudieron cargar las estadías."));
+    } finally {
+      setStaysLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && activeView === "stays") void loadStays();
+  }, [user, activeView, loadStays]);
+
+  // handleStaySubmit registra una nueva estadía vinculada a un residente y una habitación.
+  async function handleStaySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stayResidentId || !stayRoomId) {
+      setStayError("Selecciona un residente y una habitación.");
+      return;
+    }
+    if (stayCheckIn && Number.isNaN(Date.parse(stayCheckIn))) {
+      setStayError("La fecha de ingreso debe usar formato AAAA-MM-DD.");
+      return;
+    }
+    if (stayCheckOut && Number.isNaN(Date.parse(stayCheckOut))) {
+      setStayError("La fecha de salida debe usar formato AAAA-MM-DD.");
+      return;
+    }
+    if (stayCheckIn && stayCheckOut && new Date(stayCheckOut) < new Date(stayCheckIn)) {
+      setStayError("La fecha de salida no puede ser anterior a la de ingreso.");
+      return;
+    }
+
+    setStayError("");
+    setStaySuccess("");
+    setStaysSaving(true);
+    try {
+      const response = await apiFetch("/stays/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: stayResidentId,
+          roomId: stayRoomId,
+          status: stayStatus,
+          checkIn: stayCheckIn,
+          checkOut: stayCheckOut,
+          notes: stayNotes.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la estadía."));
+      }
+      setStaySuccess("Estadía creada correctamente.");
+      setStayResidentId("");
+      setStayRoomId("");
+      setStayStatus("planned");
+      setStayCheckIn("");
+      setStayCheckOut("");
+      setStayNotes("");
+      await loadStays();
+    } catch (err) {
+      setStayError(userFacingError(err, "No se pudo guardar la estadía."));
+    } finally {
+      setStaysSaving(false);
+    }
+  }
+
+  const loadClinicalNotes = useCallback(async () => {
+    if (!hasPermission(user, "medical.read")) return;
+    setClinicalNotesLoading(true);
+    setClinicalError("");
+    try {
+      const response = await apiFetch("/medical/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las notas clínicas."));
+      }
+      const data = (await response.json()) as ClinicalNote[];
+      setClinicalNotes(data.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")));
+    } catch (err) {
+      setClinicalError(userFacingError(err, "No se pudieron cargar las notas clínicas."));
+    } finally {
+      setClinicalNotesLoading(false);
+    }
+  }, [user]);
+
+  const loadMedicationEvents = useCallback(async () => {
+    if (!hasPermission(user, "medication.read")) return;
+    setMedicationLoading(true);
+    setMedicationError("");
+    try {
+      const response = await apiFetch("/medication-events/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar los medicamentos."));
+      }
+      const data = (await response.json()) as MedicationEvent[];
+      setMedicationEvents(data.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")));
+    } catch (err) {
+      setMedicationError(userFacingError(err, "No se pudieron cargar los medicamentos."));
+    } finally {
+      setMedicationLoading(false);
+    }
+  }, [user]);
+
+  const loadDietPlans = useCallback(async () => {
+    if (!hasPermission(user, "diet.read")) return;
+    setDietPlansLoading(true);
+    setDietPlanError("");
+    try {
+      const response = await apiFetch("/diet-plans/");
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudieron cargar las dietas."));
+      }
+      const data = (await response.json()) as DietPlan[];
+      setDietPlans(data.sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? "")));
+    } catch (err) {
+      setDietPlanError(userFacingError(err, "No se pudieron cargar las dietas."));
+    } finally {
+      setDietPlansLoading(false);
+    }
+  }, [user]);
+
+  // loadBilling carga el libro interno y, cuando hay residente elegido, calcula su saldo vigente.
+  const loadBilling = useCallback(async () => {
+    if (!hasPermission(user, "billing.read")) return;
+    setBillingLoading(true);
+    setInstallmentLoading(true);
+    setTaxDraftLoading(true);
+    setReconciliationLoading(true);
+    setBillingError("");
+    try {
+      const query = billingResidentId ? `?residentId=${encodeURIComponent(billingResidentId)}` : "";
+      const response = await apiFetch(`/billing/${query}`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo cargar la facturación."));
+      const entries = (await response.json()) as BillingEntry[];
+      setBillingEntries(entries);
+      if (billingResidentId) {
+        const summaryResponse = await apiFetch(`/billing/summary?residentId=${encodeURIComponent(billingResidentId)}`);
+        if (!summaryResponse.ok) throw new Error(await getApiError(summaryResponse, "No se pudo calcular el saldo."));
+        setBillingSummary((await summaryResponse.json()) as BillingSummary);
+      } else {
+        setBillingSummary(null);
+      }
+      const residentQuery = billingResidentId ? `?residentId=${encodeURIComponent(billingResidentId)}` : "";
+      const [plansResponse, draftsResponse, batchesResponse] = await Promise.all([
+        apiFetch(`/billing/installment-plans${residentQuery}`),
+        apiFetch(`/billing/tax-document-drafts${residentQuery}`),
+        apiFetch("/billing/reconciliation/batches"),
+      ]);
+      if (!plansResponse.ok || !draftsResponse.ok || !batchesResponse.ok) {
+        throw new Error("No se pudieron cargar todas las vistas de facturación experimental.");
+      }
+      setInstallmentPlans((await plansResponse.json()) as InstallmentPlan[]);
+      setTaxDrafts((await draftsResponse.json()) as TaxDocumentDraft[]);
+      setReconciliationBatches((await batchesResponse.json()) as ReconciliationBatch[]);
+    } catch (err) {
+      setBillingError(userFacingError(err, "No se pudo cargar la facturación."));
+    } finally {
+      setBillingLoading(false);
+      setInstallmentLoading(false);
+      setTaxDraftLoading(false);
+      setReconciliationLoading(false);
+    }
+  }, [user, billingResidentId]);
+
+  // loadPrivateDocuments obtiene solo metadatos de los documentos que la sesión puede consultar.
+  const loadPrivateDocuments = useCallback(async () => {
+    if (!hasPermission(user, "document.read")) return;
+    setDocumentsLoading(true);
+    setDocumentsError("");
+    const query = documentsResidentId ? `?residentId=${encodeURIComponent(documentsResidentId)}` : "";
+    try {
+      const response = await apiFetch(`/documents/${query}`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudieron cargar los documentos."));
+      setPrivateDocuments((await response.json()) as PrivateDocument[]);
+    } catch (err) {
+      setDocumentsError(userFacingError(err, "No se pudieron cargar los documentos."));
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [user, documentsResidentId]);
+
+  // loadAudit consulta eventos filtrables sin descargar datos fuera del módulo autorizado.
+  const loadAudit = useCallback(async () => {
+    if (!hasPermission(user, "audit.read")) return;
+    setAuditLoading(true);
+    setAuditError("");
+    const query = new URLSearchParams();
+    if (auditActorFilter.trim()) query.set("actor", auditActorFilter.trim());
+    if (auditResourceFilter) query.set("resource", auditResourceFilter);
+    try {
+      const response = await apiFetch(`/audit/${query.size ? `?${query.toString()}` : ""}`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo consultar la auditoría."));
+      setAuditEvents((await response.json()) as AuditEvent[]);
+    } catch (err) {
+      setAuditError(userFacingError(err, "No se pudo consultar la auditoría."));
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [user, auditActorFilter, auditResourceFilter]);
+
+  useEffect(() => {
+    if (user && activeView === "clinical") {
+      void loadClinicalNotes();
+      void loadMedicationEvents();
+    }
+    if (user && activeView === "food") {
+      void loadDietPlans();
+    }
+    if (user && activeView === "billing") void loadBilling();
+    if (user && activeView === "documents") void loadPrivateDocuments();
+    if (user && activeView === "audit") void loadAudit();
+  }, [user, activeView, loadClinicalNotes, loadMedicationEvents, loadDietPlans, loadBilling, loadPrivateDocuments, loadAudit]);
+
+  async function handleBillingSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountClp = Number(billingAmount);
+    if (!billingResidentId || !billingDescription.trim() || !Number.isSafeInteger(amountClp) || amountClp <= 0) {
+      setBillingError("Selecciona residente e ingresa descripción y monto entero válido.");
+      return;
+    }
+    setBillingError("");
+    setBillingSuccess("");
+    setBillingSaving(true);
+    try {
+      const path = billingKind === "charge" ? "/billing/charges" : "/billing/payments";
+      const response = await apiFetch(path, {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          description: billingDescription.trim(),
+          amountClp,
+          dueDate: billingKind === "charge" ? billingDueDate : "",
+          paymentMethod: billingKind === "payment" ? billingPaymentMethod : "",
+          reference: billingReference.trim(),
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo registrar el movimiento."));
+      setBillingSuccess(billingKind === "charge" ? "Cargo registrado." : "Pago registrado.");
+      setBillingDescription("");
+      setBillingAmount("");
+      setBillingDueDate("");
+      setBillingReference("");
+      await loadBilling();
+    } catch (err) {
+      setBillingError(userFacingError(err, "No se pudo registrar el movimiento."));
+    } finally {
+      setBillingSaving(false);
+    }
+  }
+
+  async function handleInstallmentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const totalAmountClp = Number(installmentTotal);
+    const installmentCountValue = Number(installmentCount);
+    if (!billingResidentId || !installmentDescription.trim() || !Number.isSafeInteger(totalAmountClp) || !Number.isInteger(installmentCountValue)) {
+      setInstallmentError("Selecciona residente e ingresa descripción, monto entero y cantidad de cuotas.");
+      return;
+    }
+    setInstallmentError("");
+    setInstallmentSuccess("");
+    setInstallmentSaving(true);
+    try {
+      const response = await apiFetch("/billing/installment-plans", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          description: installmentDescription.trim(),
+          totalAmountClp,
+          installmentCount: installmentCountValue,
+          firstDueDate: installmentFirstDueDate,
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo crear el plan de cuotas."));
+      setInstallmentSuccess("Plan local de cuotas creado; no se emitieron documentos fiscales.");
+      setInstallmentDescription("");
+      setInstallmentTotal("");
+      await loadBilling();
+    } catch (err) {
+      setInstallmentError(userFacingError(err, "No se pudo crear el plan de cuotas."));
+    } finally {
+      setInstallmentSaving(false);
+    }
+  }
+
+  async function handleTaxDraftSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountClp = Number(taxDraftAmount);
+    if (!billingResidentId || !taxDraftDescription.trim() || !Number.isSafeInteger(amountClp) || amountClp <= 0) {
+      setTaxDraftError("Selecciona residente e ingresa descripción y monto entero válido.");
+      return;
+    }
+    setTaxDraftError("");
+    setTaxDraftSuccess("");
+    setTaxDraftSaving(true);
+    try {
+      const response = await apiFetch("/billing/tax-document-drafts", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          documentType: taxDraftType,
+          description: taxDraftDescription.trim(),
+          amountClp,
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo guardar el borrador."));
+      setTaxDraftSuccess("Borrador interno creado. No es un DTE y no tiene validez tributaria.");
+      setTaxDraftDescription("");
+      setTaxDraftAmount("");
+      await loadBilling();
+    } catch (err) {
+      setTaxDraftError(userFacingError(err, "No se pudo guardar el borrador."));
+    } finally {
+      setTaxDraftSaving(false);
+    }
+  }
+
+  async function handleMockPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountClp = Number(mockPaymentAmount);
+    if (!billingResidentId || !mockPaymentDescription.trim() || !Number.isSafeInteger(amountClp) || amountClp <= 0) {
+      setMockPaymentError("Selecciona residente e ingresa descripción y monto entero válido.");
+      return;
+    }
+    setMockPaymentError("");
+    setMockPaymentSuccess("");
+    setMockPaymentSaving(true);
+    try {
+      const response = await apiFetch("/billing/mock-payments", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: billingResidentId,
+          description: mockPaymentDescription.trim(),
+          amountClp,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo completar la simulación."));
+      const result = (await response.json()) as { simulated: boolean; message: string };
+      setMockPaymentSuccess(result.message);
+      setMockPaymentDescription("");
+      setMockPaymentAmount("");
+      await loadBilling();
+    } catch (err) {
+      setMockPaymentError(userFacingError(err, "No se pudo completar la simulación."));
+    } finally {
+      setMockPaymentSaving(false);
+    }
+  }
+
+  async function handleReconciliationImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reconciliationFile) {
+      setReconciliationError("Selecciona un CSV de prueba para conciliar.");
+      return;
+    }
+    if (reconciliationFile.size > 5 * 1024 * 1024) {
+      setReconciliationError("El CSV no puede superar 5 MiB.");
+      return;
+    }
+    setReconciliationError("");
+    setReconciliationSaving(true);
+    try {
+      const response = await apiFetch("/billing/reconciliation/import", {
+        method: "POST",
+        headers: { "Content-Type": "text/csv" },
+        body: await reconciliationFile.text(),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo conciliar el CSV."));
+      setReconciliationFile(null);
+      const input = document.getElementById("billing-reconciliation-file") as HTMLInputElement | null;
+      if (input) input.value = "";
+      await loadBilling();
+    } catch (err) {
+      setReconciliationError(userFacingError(err, "No se pudo conciliar el CSV."));
+    } finally {
+      setReconciliationSaving(false);
+    }
+  }
+
+  async function handleDocumentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!documentsResidentId || !documentFile || !documentTitle.trim()) {
+      setDocumentsError("Selecciona residente, archivo y título.");
+      return;
+    }
+    if (documentFile.size > 8 * 1024 * 1024) {
+      setDocumentsError("El archivo no puede superar 8 MiB.");
+      return;
+    }
+    setDocumentsError("");
+    setDocumentsSuccess("");
+    setDocumentSaving(true);
+    try {
+      const dataURL = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("No se pudo leer el archivo."));
+        reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+        reader.readAsDataURL(documentFile);
+      });
+      const response = await apiFetch("/documents/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: documentsResidentId,
+          fileName: documentFile.name,
+          title: documentTitle.trim(),
+          category: documentCategory,
+          contentType: documentFile.type || "application/octet-stream",
+          contentBase64: dataURL.split(",", 2)[1] ?? "",
+        }),
+      });
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo guardar el documento."));
+      setDocumentsSuccess("Documento guardado de forma privada.");
+      setDocumentTitle("");
+      setDocumentFile(null);
+      const input = document.getElementById("document-file") as HTMLInputElement | null;
+      if (input) input.value = "";
+      await loadPrivateDocuments();
+    } catch (err) {
+      setDocumentsError(userFacingError(err, "No se pudo guardar el documento."));
+    } finally {
+      setDocumentSaving(false);
+    }
+  }
+
+  // downloadPrivateDocument recupera el archivo bajo autorización y libera la URL temporal al descargarlo.
+  async function downloadPrivateDocument(documentItem: PrivateDocument) {
+    setDocumentsError("");
+    setDocumentDownloading(documentItem.id);
+    try {
+      const response = await apiFetch(`/documents/${encodeURIComponent(documentItem.id)}/download`);
+      if (!response.ok) throw new Error(await getApiError(response, "No se pudo descargar el documento."));
+      const objectURL = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = objectURL;
+      link.download = documentItem.fileName;
+      link.click();
+      URL.revokeObjectURL(objectURL);
+    } catch (err) {
+      setDocumentsError(userFacingError(err, "No se pudo descargar el documento."));
+    } finally {
+      setDocumentDownloading("");
+    }
+  }
+
+  async function handleClinicalSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!clinicalResidentId) {
+      setClinicalError("Selecciona un residente.");
+      return;
+    }
+    if (!clinicalSummary.trim()) {
+      setClinicalError("El resumen es obligatorio.");
+      return;
+    }
+    setClinicalError("");
+    setClinicalSuccess("");
+    setClinicalNotesSaving(true);
+    try {
+      const response = await apiFetch("/medical/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: clinicalResidentId,
+          summary: clinicalSummary.trim(),
+          severity: clinicalSeverity,
+          notes: clinicalNotesText.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la nota clínica."));
+      }
+      setClinicalSuccess("Nota clínica guardada.");
+      setClinicalResidentId("");
+      setClinicalSummary("");
+      setClinicalSeverity("normal");
+      setClinicalNotesText("");
+      await loadClinicalNotes();
+    } catch (err) {
+      setClinicalError(userFacingError(err, "No se pudo guardar la nota clínica."));
+    } finally {
+      setClinicalNotesSaving(false);
+    }
+  }
+
+  async function handleMedicationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!medicationResidentId) {
+      setMedicationError("Selecciona un residente.");
+      return;
+    }
+    if (!medicationName.trim() || !medicationDose.trim()) {
+      setMedicationError("El medicamento y la dosis son obligatorios.");
+      return;
+    }
+    setMedicationError("");
+    setMedicationSuccess("");
+    setMedicationSaving(true);
+    try {
+      const response = await apiFetch("/medication-events/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: medicationResidentId,
+          medication: medicationName.trim(),
+          dose: medicationDose.trim(),
+          schedule: medicationSchedule.trim(),
+          status: medicationStatus,
+          notes: medicationNotes.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo registrar el medicamento."));
+      }
+      setMedicationSuccess("Evento de medicación registrado.");
+      setMedicationResidentId("");
+      setMedicationName("");
+      setMedicationDose("");
+      setMedicationSchedule("");
+      setMedicationStatus("scheduled");
+      setMedicationNotes("");
+      await loadMedicationEvents();
+    } catch (err) {
+      setMedicationError(userFacingError(err, "No se pudo registrar el medicamento."));
+    } finally {
+      setMedicationSaving(false);
+    }
+  }
+
+  async function handleDietPlanSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!dietPlanResidentId) {
+      setDietPlanError("Selecciona un residente.");
+      return;
+    }
+    if (!dietPlanMenu.trim()) {
+      setDietPlanError("El menú de la alimentación es obligatorio.");
+      return;
+    }
+    setDietPlanError("");
+    setDietPlanSuccess("");
+    setDietPlansSaving(true);
+    try {
+      const response = await apiFetch("/diet-plans/", {
+        method: "POST",
+        body: JSON.stringify({
+          residentId: dietPlanResidentId,
+          mealType: dietPlanMealType,
+          menu: dietPlanMenu.trim(),
+          status: dietPlanStatus,
+          notes: dietPlanNotes.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiError(response, "No se pudo guardar la alimentación."));
+      }
+      setDietPlanSuccess("Dieta guardada correctamente.");
+      setDietPlanResidentId("");
+      setDietPlanMealType("lunch");
+      setDietPlanMenu("");
+      setDietPlanStatus("planned");
+      setDietPlanNotes("");
+      await loadDietPlans();
+    } catch (err) {
+      setDietPlanError(userFacingError(err, "No se pudo guardar la alimentación."));
+    } finally {
+      setDietPlansSaving(false);
     }
   }
 
@@ -662,7 +1653,9 @@ export default function App() {
     { id: "dashboard", label: "Resumen", permissions: ["dashboard.read"] },
     { id: "residents", label: "Residentes", permissions: ["resident.read"] },
     { id: "rooms", label: "Habitaciones", permissions: ["room.read"] },
+    { id: "stays", label: "Estadías", permissions: ["stay.read"] },
     { id: "clinical", label: "Atención clínica", permissions: ["medical.read", "medication.read"] },
+    { id: "food", label: "Alimentación", permissions: ["diet.read", "food.update"] },
     { id: "billing", label: "Facturación", permissions: ["billing.read"] },
     { id: "documents", label: "Documentos", permissions: ["document.read"] },
     { id: "users", label: "Usuarios", permissions: ["user.read"] },
@@ -672,6 +1665,7 @@ export default function App() {
     ? activeView
     : modules[0]?.id ?? "none";
   const roleLabels: Record<string, string> = {
+    pending: "Pendiente de aprobación",
     admin: "Administración",
     manager: "Dirección",
     nurse: "Enfermería",
@@ -679,10 +1673,10 @@ export default function App() {
     reception: "Recepción",
     accounting: "Contabilidad",
   };
-  const roomStatusLabels: Record<RoomStatus, string> = {
-    available: "Disponible",
-    maintenance: "En mantención",
-    closed: "Cerrada",
+  const stayStatusLabels: Record<StayStatus, string> = {
+    planned: "Planificada",
+    active: "Activa",
+    completed: "Finalizada",
   };
   const assignedResidentIds = new Set(rooms.flatMap((room) => room.occupantIds ?? []));
   const assignableResidents = residents.filter(
@@ -697,7 +1691,10 @@ export default function App() {
     return (
       <main className="login-layout">
         <section className="login-panel" aria-labelledby="login-title">
-          <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+          <div className="login-topbar">
+            <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
           <p className="eyebrow">Residencia de personas mayores</p>
           <h1 id="login-title">Ingreso al sistema</h1>
           <p className="login-intro">Acceso seguro a la operación y cuidado diario.</p>
@@ -726,6 +1723,25 @@ export default function App() {
               {loginSaving ? "Ingresando..." : "Ingresar"}
             </button>
           </form>
+          {oauthProviders.length > 0 && (
+            <div className="oauth-login" aria-label="Acceso con proveedor externo">
+              <p className="oauth-divider"><span>o continuar con</span></p>
+              <div className="oauth-buttons">
+                {oauthProviders.includes("google") && (
+                  <button type="button" className="oauth-button" onClick={() => startOAuthLogin("google")}>
+                    <span className="oauth-mark oauth-google" aria-hidden="true">G</span>
+                    Google
+                  </button>
+                )}
+                {oauthProviders.includes("microsoft") && (
+                  <button type="button" className="oauth-button" onClick={() => startOAuthLogin("microsoft")}>
+                    <span className="oauth-mark oauth-microsoft" aria-hidden="true">M</span>
+                    Microsoft
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <p className="login-footnote">El acceso y las funciones disponibles dependen de tu perfil.</p>
         </section>
         <aside className="login-aside" aria-label="CIMA">
@@ -736,6 +1752,29 @@ export default function App() {
           </div>
           <span className="aside-index">GESTIÓN RESIDENCIAL · CHILE</span>
         </aside>
+      </main>
+    );
+  }
+
+  if (user.role === "pending") {
+    return (
+      <main className="approval-layout">
+        <section className="approval-panel" aria-labelledby="approval-title">
+          <div className="login-topbar">
+            <div className="brand-lockup"><span className="brand-mark">C</span><span>CIMA</span></div>
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
+          <p className="eyebrow">Registro con Google</p>
+          <h1 id="approval-title">Cuenta creada</h1>
+          <p className="login-intro">Hola, {user.displayName || user.username}. Tu registro se completó correctamente.</p>
+          {user.email && <p className="approval-email">{user.email}</p>}
+          <p className="approval-notice">Un administrador debe asignar un perfil antes de habilitar el acceso a la información de CIMA.</p>
+          {approvalError && <p className="error" role="status">{approvalError}</p>}
+          <button className="primary-button" type="button" onClick={() => void handleApprovalRefresh()} disabled={approvalRefreshing}>
+            {approvalRefreshing ? "Comprobando..." : "Comprobar aprobación"}
+          </button>
+          <button className="approval-logout" type="button" onClick={handleLogout}>Cerrar sesión</button>
+        </section>
       </main>
     );
   }
@@ -760,8 +1799,8 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-user">
-          <span className="user-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
-          <span className="user-summary"><strong>{user.username}</strong><small>{roleLabels[user.role] ?? user.role}</small></span>
+          <span className="user-avatar">{(user.displayName || user.username).slice(0, 1).toUpperCase()}</span>
+          <span className="user-summary"><strong>{user.displayName || user.username}</strong><small>{roleLabels[user.role] ?? user.role}</small></span>
           <button className="logout-button" type="button" onClick={handleLogout} aria-label="Cerrar sesión" title="Cerrar sesión">↪</button>
         </div>
       </aside>
@@ -771,13 +1810,13 @@ export default function App() {
             <p className="eyebrow">{roleLabels[user.role] ?? user.role}</p>
             <h1 id="app-title">{modules.find((module) => module.id === currentView)?.label ?? "CIMA"}</h1>
           </div>
-          <div className="header-user"><span className="online-dot" /> Sesión activa</div>
+          <div className="header-user"><ThemeToggle theme={theme} onToggle={toggleTheme} /><span className="online-dot" /> Sesión activa</div>
         </header>
 
         {currentView === "dashboard" && hasPermission(user, "dashboard.read") ? (
           <section className="dashboard-content" aria-labelledby="dashboard-title">
             <div className="welcome-row">
-              <div><p className="eyebrow">PANEL DE CONTROL</p><h2 id="dashboard-title">Buenos días, {user.username}</h2><p>Resumen de tu acceso y operación de la residencia.</p></div>
+              <div><p className="eyebrow">PANEL DE CONTROL</p><h2 id="dashboard-title">Buenos días, {user.displayName || user.username}</h2><p>Resumen de tu acceso y operación de la residencia.</p></div>
               <span className="date-stamp">CIMA · CHILE</span>
             </div>
             {dashboardError && <p className="error" role="alert">{dashboardError}</p>}
@@ -803,6 +1842,60 @@ export default function App() {
               <div className="permission-list">
                 {(user.role === "admin" ? ["Acceso administrativo"] : user.permissions ?? []).map((permission) => <span className="permission-item" key={permission}>{permissionLabel(permission)}</span>)}
               </div>
+            </section>
+          </section>
+        ) : currentView === "users" && hasPermission(user, "user.read") ? (
+          <section className="resident-content" aria-label="Administración de usuarios">
+            <section className="card" aria-labelledby="users-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ACCESO</p><h2 id="users-title">Usuarios del sistema</h2></div>
+                <button type="button" onClick={() => void loadManagedUsers()} disabled={managedUsersLoading}>
+                  {managedUsersLoading ? "Actualizando..." : "Actualizar"}
+                </button>
+              </div>
+              {managedUsersError && <p className="error" role="alert">{managedUsersError}</p>}
+              {managedUsersLoading ? (
+                <p role="status">Cargando usuarios...</p>
+              ) : managedUsers.length === 0 ? (
+                <p>No hay usuarios registrados.</p>
+              ) : (
+                <ul className="resident-list user-management-list">
+                  {managedUsers.map((account) => (
+                    <li key={account.id}>
+                      <div className="user-management-row">
+                        <div className="user-management-summary">
+                          <strong>{account.displayName || account.username}</strong>
+                          {account.email && <span>{account.email}</span>}
+                          <small>{account.username}</small>
+                          <span>{roleLabels[account.role] ?? account.role}</span>
+                        </div>
+                        {hasPermission(user, "user.write") && (
+                          <form className="user-role-form" onSubmit={(event) => void handleManagedUserRoleChange(event, account.id)}>
+                            <label className="visually-hidden" htmlFor={`user-role-${account.id}`}>Rol de {account.username}</label>
+                            <select
+                              id={`user-role-${account.id}`}
+                              value={managedUserRoles[account.id] ?? account.role}
+                              onChange={(event) => setManagedUserRoles((roles) => ({ ...roles, [account.id]: event.target.value }))}
+                              disabled={managedUserSaving === account.id}
+                            >
+                              <option value="pending">Pendiente de aprobación</option>
+                              <option value="manager">Dirección</option>
+                              <option value="nurse">Enfermería</option>
+                              <option value="kitchen">Alimentación</option>
+                              <option value="reception">Recepción</option>
+                              <option value="accounting">Contabilidad</option>
+                              <option value="admin">Administración</option>
+                            </select>
+                            <button type="submit" disabled={managedUserSaving === account.id || managedUserRoles[account.id] === account.role}>
+                              {managedUserSaving === account.id ? "Guardando..." : "Guardar rol"}
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           </section>
         ) : currentView === "rooms" && hasPermission(user, "room.read") ? (
@@ -831,7 +1924,7 @@ export default function App() {
                     required
                     disabled={roomsSaving}
                   />
-                  <label htmlFor="room-status">Estado</label>
+                  <label htmlFor="room-status">Estado operativo</label>
                   <select
                     id="room-status"
                     value={roomStatus}
@@ -867,8 +1960,9 @@ export default function App() {
                 <p>No hay habitaciones registradas.</p>
               ) : (
                 <ul className="resident-list">
-                  {rooms.map((room) => (
-                    <li key={room.id}>
+                  {rooms.map((room) => {
+                    const displayStatus = roomDisplayStatus(room);
+                    return <li key={room.id}>
                       <div className="room-record">
                         <div className="room-record-heading">
                           <div className="room-summary">
@@ -876,7 +1970,9 @@ export default function App() {
                             <span>Ocupación: {room.occupancy} de {room.capacity}</span>
                           </div>
                           <div className="resident-actions">
-                            <span className={`status room-status-${room.status}`}>{roomStatusLabels[room.status]}</span>
+                            <span className={`status room-status-${displayStatus.kind}`} title={`Ocupación: ${room.occupancy} de ${room.capacity}`}>
+                              {displayStatus.label}
+                            </span>
                             {hasPermission(user, "room.write") && <button type="button" onClick={() => startRoomEdit(room)}>Editar</button>}
                           </div>
                         </div>
@@ -940,9 +2036,465 @@ export default function App() {
                           </ol>
                         )}
                       </div>
-                    </li>
-                  ))}
+                    </li>;
+                  })}
                 </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "stays" && hasPermission(user, "stay.read") ? (
+          <section className="resident-content" aria-label="Gestión de estadías">
+            {hasPermission(user, "stay.write") && (
+              <section className="card" aria-labelledby="stay-form-title">
+                <h2 id="stay-form-title">Nueva estadía</h2>
+                <form onSubmit={handleStaySubmit}>
+                  <label htmlFor="stay-resident">Residente</label>
+                  <select id="stay-resident" value={stayResidentId} onChange={(event) => setStayResidentId(event.target.value)} required disabled={staysSaving}>
+                    <option value="">Seleccionar residente activo</option>
+                    {residents.filter((resident) => resident.status === "active").map((resident) => (
+                      <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                    ))}
+                  </select>
+
+                  <label htmlFor="stay-room">Habitación</label>
+                  <select id="stay-room" value={stayRoomId} onChange={(event) => setStayRoomId(event.target.value)} required disabled={staysSaving}>
+                    <option value="">Seleccionar habitación</option>
+                    {rooms.map((room) => (
+                      <option key={room.id} value={room.id}>{room.code} ({room.occupancy}/{room.capacity})</option>
+                    ))}
+                  </select>
+
+                  <label htmlFor="stay-status">Estado</label>
+                  <select id="stay-status" value={stayStatus} onChange={(event) => setStayStatus(event.target.value as StayStatus)} disabled={staysSaving}>
+                    <option value="planned">Planificada</option>
+                    <option value="active">Activa</option>
+                    <option value="completed">Finalizada</option>
+                  </select>
+
+                  <label htmlFor="stay-checkin">Fecha de ingreso</label>
+                  <input id="stay-checkin" type="date" value={stayCheckIn} onChange={(event) => setStayCheckIn(event.target.value)} disabled={staysSaving} />
+
+                  <label htmlFor="stay-checkout">Fecha de salida</label>
+                  <input id="stay-checkout" type="date" value={stayCheckOut} onChange={(event) => setStayCheckOut(event.target.value)} disabled={staysSaving} />
+
+                  <label htmlFor="stay-notes">Notas</label>
+                  <textarea id="stay-notes" value={stayNotes} onChange={(event) => setStayNotes(event.target.value)} rows={3} disabled={staysSaving} />
+
+                  {stayError && <p className="error" role="alert">{stayError}</p>}
+                  {staySuccess && <p className="success" role="status">{staySuccess}</p>}
+                  <button type="submit" disabled={staysSaving}>{staysSaving ? "Guardando..." : "Guardar estadía"}</button>
+                </form>
+              </section>
+            )}
+
+            <section className="card" aria-labelledby="stays-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ALOJAMIENTO</p><h2 id="stays-list-title">Estadías</h2></div>
+                <button type="button" onClick={() => void loadStays()} disabled={staysLoading}>{staysLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {stayError && !hasPermission(user, "stay.write") && <p className="error" role="alert">{stayError}</p>}
+              {staysLoading ? (
+                <p role="status">Cargando estadías...</p>
+              ) : stays.length === 0 ? (
+                <p>No hay estadías registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {stays.map((stay) => {
+                    const resident = residents.find((item) => item.id === stay.residentId);
+                    const room = rooms.find((item) => item.id === stay.roomId);
+                    const residentName = resident ? `${resident.firstName} ${resident.lastName}` : "Residente";
+                    const roomCode = room ? room.code : "Habitación";
+                    return (
+                      <li key={stay.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{residentName}</strong>
+                              <span>{roomCode}</span>
+                            </div>
+                            <span className={`status room-status-${stay.status}`}>
+                              {stayStatusLabels[stay.status as StayStatus] ?? String(stay.status)}
+                            </span>
+                          </div>
+                          <div className="room-occupant">
+                            <span>Ingreso: {stay.checkIn ? new Date(stay.checkIn).toLocaleDateString("es-CL") : "—"}</span>
+                            <span>Salida: {stay.checkOut ? new Date(stay.checkOut).toLocaleDateString("es-CL") : "—"}</span>
+                          </div>
+                          {stay.notes && <p>{stay.notes}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "clinical" && (hasPermission(user, "medical.read") || hasPermission(user, "medication.read")) ? (
+          <section className="resident-content" aria-label="Atención clínica">
+            {(hasPermission(user, "medical.write") || hasPermission(user, "medication.write")) && (
+              <>
+                <section className="card" aria-labelledby="clinical-form-title">
+                  <h2 id="clinical-form-title">Nota clínica</h2>
+                  <form onSubmit={handleClinicalSubmit}>
+                    <label htmlFor="clinical-resident">Residente</label>
+                    <select id="clinical-resident" value={clinicalResidentId} onChange={(event) => setClinicalResidentId(event.target.value)} required disabled={clinicalNotesSaving}>
+                      <option value="">Seleccionar residente</option>
+                      {residents.filter((resident) => resident.status === "active").map((resident) => (
+                        <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                      ))}
+                    </select>
+                    <label htmlFor="clinical-summary">Resumen</label>
+                    <input id="clinical-summary" value={clinicalSummary} onChange={(event) => setClinicalSummary(event.target.value)} required disabled={clinicalNotesSaving} />
+                    <label htmlFor="clinical-severity">Severidad</label>
+                    <select id="clinical-severity" value={clinicalSeverity} onChange={(event) => setClinicalSeverity(event.target.value)} disabled={clinicalNotesSaving}>
+                      <option value="low">Baja</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">Alta</option>
+                    </select>
+                    <label htmlFor="clinical-note-text">Observaciones</label>
+                    <textarea id="clinical-note-text" value={clinicalNotesText} onChange={(event) => setClinicalNotesText(event.target.value)} rows={4} disabled={clinicalNotesSaving} />
+                    {clinicalError && <p className="error" role="alert">{clinicalError}</p>}
+                    {clinicalSuccess && <p className="success" role="status">{clinicalSuccess}</p>}
+                    <button type="submit" disabled={clinicalNotesSaving}>{clinicalNotesSaving ? "Guardando..." : "Guardar nota"}</button>
+                  </form>
+                </section>
+
+                <section className="card" aria-labelledby="medication-form-title">
+                  <h2 id="medication-form-title">Medicación</h2>
+                  <form onSubmit={handleMedicationSubmit}>
+                    <label htmlFor="medication-resident">Residente</label>
+                    <select id="medication-resident" value={medicationResidentId} onChange={(event) => setMedicationResidentId(event.target.value)} required disabled={medicationSaving}>
+                      <option value="">Seleccionar residente</option>
+                      {residents.filter((resident) => resident.status === "active").map((resident) => (
+                        <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                      ))}
+                    </select>
+                    <label htmlFor="medication-name">Medicamento</label>
+                    <input id="medication-name" value={medicationName} onChange={(event) => setMedicationName(event.target.value)} required disabled={medicationSaving} />
+                    <label htmlFor="medication-dose">Dosis</label>
+                    <input id="medication-dose" value={medicationDose} onChange={(event) => setMedicationDose(event.target.value)} required disabled={medicationSaving} />
+                    <label htmlFor="medication-schedule">Horario</label>
+                    <input id="medication-schedule" value={medicationSchedule} onChange={(event) => setMedicationSchedule(event.target.value)} disabled={medicationSaving} />
+                    <label htmlFor="medication-status">Estado</label>
+                    <select id="medication-status" value={medicationStatus} onChange={(event) => setMedicationStatus(event.target.value)} disabled={medicationSaving}>
+                      <option value="scheduled">Programado</option>
+                      <option value="given">Administrado</option>
+                      <option value="missed">No administrado</option>
+                      <option value="rejected">Rechazado</option>
+                    </select>
+                    <label htmlFor="medication-notes">Notas</label>
+                    <textarea id="medication-notes" value={medicationNotes} onChange={(event) => setMedicationNotes(event.target.value)} rows={3} disabled={medicationSaving} />
+                    {medicationError && <p className="error" role="alert">{medicationError}</p>}
+                    {medicationSuccess && <p className="success" role="status">{medicationSuccess}</p>}
+                    <button type="submit" disabled={medicationSaving}>{medicationSaving ? "Guardando..." : "Registrar medicación"}</button>
+                  </form>
+                </section>
+              </>
+            )}
+
+            <section className="card" aria-labelledby="clinical-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">EVOLUCIÓN</p><h2 id="clinical-list-title">Notas clínicas</h2></div>
+                <button type="button" onClick={() => void loadClinicalNotes()} disabled={clinicalNotesLoading}>{clinicalNotesLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {clinicalNotesLoading ? (
+                <p role="status">Cargando notas...</p>
+              ) : clinicalNotes.length === 0 ? (
+                <p>No hay notas clínicas registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {clinicalNotes.map((note) => {
+                    const resident = residents.find((item) => item.id === note.residentId);
+                    return (
+                      <li key={note.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</strong>
+                              <span>{note.summary}</span>
+                            </div>
+                            <span className={`status room-status-${note.severity === "high" ? "closed" : note.severity === "low" ? "maintenance" : "available"}`}>
+                              {note.severity}
+                            </span>
+                          </div>
+                          {note.notes && <p>{note.notes}</p>}
+                          {note.createdBy && <small>Por {note.createdBy}</small>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            <section className="card" aria-labelledby="medication-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">MEDICACIÓN</p><h2 id="medication-list-title">Eventos de medicamentos</h2></div>
+                <button type="button" onClick={() => void loadMedicationEvents()} disabled={medicationLoading}>{medicationLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {medicationLoading ? (
+                <p role="status">Cargando medicación...</p>
+              ) : medicationEvents.length === 0 ? (
+                <p>No hay eventos de medicación registrados.</p>
+              ) : (
+                <ul className="resident-list">
+                  {medicationEvents.map((event) => {
+                    const resident = residents.find((item) => item.id === event.residentId);
+                    return (
+                      <li key={event.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</strong>
+                              <span>{event.medication} · {event.dose}</span>
+                            </div>
+                            <span className="status room-status-available">{event.status}</span>
+                          </div>
+                          {event.schedule && <p>Horario: {event.schedule}</p>}
+                          {event.notes && <p>{event.notes}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "food" && (hasPermission(user, "diet.read") || hasPermission(user, "food.update")) ? (
+          <section className="resident-content" aria-label="Alimentación">
+            {hasPermission(user, "food.update") && (
+              <section className="card" aria-labelledby="food-form-title">
+                <h2 id="food-form-title">Plan de alimentación</h2>
+                <form onSubmit={handleDietPlanSubmit}>
+                  <label htmlFor="food-resident">Residente</label>
+                  <select id="food-resident" value={dietPlanResidentId} onChange={(event) => setDietPlanResidentId(event.target.value)} required disabled={dietPlansSaving}>
+                    <option value="">Seleccionar residente</option>
+                    {residents.filter((resident) => resident.status === "active").map((resident) => (
+                      <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>
+                    ))}
+                  </select>
+                  <label htmlFor="food-type">Turno</label>
+                  <select id="food-type" value={dietPlanMealType} onChange={(event) => setDietPlanMealType(event.target.value)} disabled={dietPlansSaving}>
+                    <option value="breakfast">Desayuno</option>
+                    <option value="lunch">Almuerzo</option>
+                    <option value="dinner">Cena</option>
+                    <option value="snack">Colación</option>
+                  </select>
+                  <label htmlFor="food-menu">Menú</label>
+                  <input id="food-menu" value={dietPlanMenu} onChange={(event) => setDietPlanMenu(event.target.value)} required disabled={dietPlansSaving} />
+                  <label htmlFor="food-status">Estado</label>
+                  <select id="food-status" value={dietPlanStatus} onChange={(event) => setDietPlanStatus(event.target.value)} disabled={dietPlansSaving}>
+                    <option value="planned">Planificado</option>
+                    <option value="served">Servido</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="adjusted">Ajustado</option>
+                  </select>
+                  <label htmlFor="food-notes">Observaciones</label>
+                  <textarea id="food-notes" value={dietPlanNotes} onChange={(event) => setDietPlanNotes(event.target.value)} rows={3} disabled={dietPlansSaving} />
+                  {dietPlanError && <p className="error" role="alert">{dietPlanError}</p>}
+                  {dietPlanSuccess && <p className="success" role="status">{dietPlanSuccess}</p>}
+                  <button type="submit" disabled={dietPlansSaving}>{dietPlansSaving ? "Guardando..." : "Guardar dieta"}</button>
+                </form>
+              </section>
+            )}
+
+            <section className="card" aria-labelledby="food-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ALIMENTACIÓN</p><h2 id="food-list-title">Planificación actual</h2></div>
+                <button type="button" onClick={() => void loadDietPlans()} disabled={dietPlansLoading}>{dietPlansLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              {dietPlansLoading ? (
+                <p role="status">Cargando alimentación...</p>
+              ) : dietPlans.length === 0 ? (
+                <p>No hay dietas registradas.</p>
+              ) : (
+                <ul className="resident-list">
+                  {dietPlans.map((plan) => {
+                    const resident = residents.find((item) => item.id === plan.residentId);
+                    return (
+                      <li key={plan.id}>
+                        <div className="room-record">
+                          <div className="room-record-heading">
+                            <div className="room-summary">
+                              <strong>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</strong>
+                              <span>{plan.mealType} · {plan.menu}</span>
+                            </div>
+                            <span className="status room-status-available">{plan.status}</span>
+                          </div>
+                          {plan.notes && <p>{plan.notes}</p>}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "billing" && hasPermission(user, "billing.read") ? (
+          <section className="resident-content" aria-label="Facturación">
+            <section className="module-summary-strip" aria-label="Resumen de cuenta corriente">
+              <div><span>Cargos</span><strong>{formatCLP(billingSummary?.chargesClp ?? 0)}</strong></div>
+              <div><span>Pagos</span><strong>{formatCLP(billingSummary?.paymentsClp ?? 0)}</strong></div>
+              <div><span>Saldo pendiente</span><strong>{formatCLP(billingSummary?.balanceClp ?? 0)}</strong></div>
+            </section>
+            <section className="card" aria-labelledby="billing-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">CUENTA CORRIENTE · CLP</p><h2 id="billing-title">Movimientos</h2></div>
+                <button type="button" onClick={() => void loadBilling()} disabled={billingLoading}>{billingLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              <label htmlFor="billing-resident-filter">Residente</label>
+              <select id="billing-resident-filter" value={billingResidentId} onChange={(event) => setBillingResidentId(event.target.value)}>
+                <option value="">Todas las cuentas</option>
+                {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>)}
+              </select>
+              {billingError && <p className="error" role="alert">{billingError}</p>}
+              {hasPermission(user, "billing.write") && (
+                <form className="module-entry-form" onSubmit={handleBillingSubmit}>
+                  <h3>Registrar movimiento</h3>
+                  <label htmlFor="billing-kind">Tipo</label>
+                  <select id="billing-kind" value={billingKind} onChange={(event) => setBillingKind(event.target.value as "charge" | "payment")} disabled={billingSaving}>
+                    <option value="charge">Cargo</option>
+                    <option value="payment">Pago</option>
+                  </select>
+                  {!billingResidentId && <p className="form-hint">Selecciona un residente para registrar el movimiento.</p>}
+                  <label htmlFor="billing-description">Descripción</label>
+                  <input id="billing-description" value={billingDescription} onChange={(event) => setBillingDescription(event.target.value)} maxLength={140} required disabled={billingSaving} />
+                  <label htmlFor="billing-amount">Monto en pesos</label>
+                  <input id="billing-amount" type="number" min="1" step="1" value={billingAmount} onChange={(event) => setBillingAmount(event.target.value)} required disabled={billingSaving} />
+                  {billingKind === "charge" ? (
+                    <>
+                      <label htmlFor="billing-due-date">Vencimiento</label>
+                      <input id="billing-due-date" type="date" value={billingDueDate} onChange={(event) => setBillingDueDate(event.target.value)} disabled={billingSaving} />
+                    </>
+                  ) : (
+                    <>
+                      <label htmlFor="billing-payment-method">Medio de pago</label>
+                      <select id="billing-payment-method" value={billingPaymentMethod} onChange={(event) => setBillingPaymentMethod(event.target.value)} disabled={billingSaving}>
+                        <option value="transferencia">Transferencia</option>
+                        <option value="efectivo">Efectivo</option>
+                        <option value="tarjeta">Tarjeta</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </>
+                  )}
+                  <label htmlFor="billing-reference">Referencia</label>
+                  <input id="billing-reference" value={billingReference} onChange={(event) => setBillingReference(event.target.value)} maxLength={100} disabled={billingSaving} />
+                  {billingSuccess && <p className="success" role="status">{billingSuccess}</p>}
+                  <button type="submit" disabled={billingSaving || !billingResidentId}>{billingSaving ? "Guardando..." : billingKind === "charge" ? "Registrar cargo" : "Registrar pago"}</button>
+                </form>
+              )}
+            </section>
+            <section className="card" aria-labelledby="billing-ledger-title">
+              <h2 id="billing-ledger-title">Libro de movimientos</h2>
+              {billingLoading ? <p role="status">Cargando movimientos...</p> : billingEntries.length === 0 ? <p>No hay movimientos para mostrar.</p> : (
+                <div className="table-scroll"><table className="data-table">
+                  <thead><tr><th>Fecha</th><th>Residente</th><th>Movimiento</th><th>Descripción</th><th>Monto</th><th>Registrado por</th></tr></thead>
+                  <tbody>{billingEntries.map((entry) => {
+                    const resident = residents.find((item) => item.id === entry.residentId);
+                    return <tr key={entry.id}>
+                      <td>{new Date(entry.createdAt).toLocaleDateString("es-CL")}</td>
+                      <td>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</td>
+                      <td><span className={`status ${entry.kind === "payment" ? "status-payment" : "status-charge"}`}>{entry.kind === "payment" ? "Pago" : "Cargo"}</span></td>
+                      <td>{entry.description}{entry.reference ? ` · ${entry.reference}` : ""}</td>
+                      <td>{formatCLP(entry.amountClp)}</td>
+                      <td>{entry.createdBy}</td>
+                    </tr>;
+                  })}</tbody>
+                </table></div>
+              )}
+            </section>
+          </section>
+        ) : currentView === "documents" && hasPermission(user, "document.read") ? (
+          <section className="resident-content" aria-label="Documentos privados">
+            {hasPermission(user, "document.write") && (
+              <section className="card" aria-labelledby="document-upload-title">
+                <h2 id="document-upload-title">Guardar documento</h2>
+                <form className="module-entry-form" onSubmit={handleDocumentSubmit}>
+                  <label htmlFor="documents-resident">Residente</label>
+                  <select id="documents-resident" value={documentsResidentId} onChange={(event) => setDocumentsResidentId(event.target.value)} required disabled={documentSaving}>
+                    <option value="">Seleccionar residente</option>
+                    {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>)}
+                  </select>
+                  <label htmlFor="document-title">Título</label>
+                  <input id="document-title" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} maxLength={140} required disabled={documentSaving} />
+                  <label htmlFor="document-category">Categoría</label>
+                  <select id="document-category" value={documentCategory} onChange={(event) => setDocumentCategory(event.target.value)} disabled={documentSaving}>
+                    <option value="identity">Identidad</option>
+                    <option value="medical">Médico</option>
+                    <option value="contract">Contrato</option>
+                    <option value="billing">Facturación</option>
+                    <option value="other">Otro</option>
+                  </select>
+                  <label htmlFor="document-file">Archivo (máximo 8 MiB)</label>
+                  <input id="document-file" type="file" accept="application/pdf,image/png,image/jpeg,text/plain" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} required disabled={documentSaving} />
+                  {documentsError && <p className="error" role="alert">{documentsError}</p>}
+                  {documentsSuccess && <p className="success" role="status">{documentsSuccess}</p>}
+                  <button type="submit" disabled={documentSaving}>{documentSaving ? "Guardando..." : "Guardar documento privado"}</button>
+                </form>
+              </section>
+            )}
+            <section className="card" aria-labelledby="documents-list-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">ARCHIVO PRIVADO</p><h2 id="documents-list-title">Documentos</h2></div>
+                <button type="button" onClick={() => void loadPrivateDocuments()} disabled={documentsLoading}>{documentsLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              <label htmlFor="documents-resident-filter">Filtrar por residente</label>
+              <select id="documents-resident-filter" value={documentsResidentId} onChange={(event) => setDocumentsResidentId(event.target.value)}>
+                <option value="">Todos</option>
+                {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.firstName} {resident.lastName}</option>)}
+              </select>
+              {documentsError && !hasPermission(user, "document.write") && <p className="error" role="alert">{documentsError}</p>}
+              {documentsLoading ? <p role="status">Cargando documentos...</p> : privateDocuments.length === 0 ? <p>No hay documentos para mostrar.</p> : (
+                <ul className="resident-list">
+                  {privateDocuments.map((item) => {
+                    const resident = residents.find((entry) => entry.id === item.residentId);
+                    return <li key={item.id} className="document-list-row">
+                      <div className="document-summary">
+                        <strong>{item.title}</strong>
+                        <span>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"} · {item.category} · {(item.sizeBytes / 1024).toFixed(0)} KiB</span>
+                        <small>{new Date(item.createdAt).toLocaleDateString("es-CL")} · {item.uploadedBy}</small>
+                      </div>
+                      <button type="button" className="secondary-action" onClick={() => void downloadPrivateDocument(item)} disabled={documentDownloading === item.id}>
+                        {documentDownloading === item.id ? "Descargando..." : "Descargar"}
+                      </button>
+                    </li>;
+                  })}
+                </ul>
+              )}
+            </section>
+          </section>
+        ) : currentView === "audit" && hasPermission(user, "audit.read") ? (
+          <section className="resident-content" aria-label="Auditoría del sistema">
+            <section className="card" aria-labelledby="audit-title">
+              <div className="section-heading">
+                <div><p className="eyebrow">TRAZABILIDAD</p><h2 id="audit-title">Eventos recientes</h2></div>
+                <button type="button" onClick={() => void loadAudit()} disabled={auditLoading}>{auditLoading ? "Actualizando..." : "Actualizar"}</button>
+              </div>
+              <div className="audit-filters">
+                <div><label htmlFor="audit-actor">Usuario</label><input id="audit-actor" value={auditActorFilter} onChange={(event) => setAuditActorFilter(event.target.value)} maxLength={80} /></div>
+                <div><label htmlFor="audit-resource">Módulo</label>
+                  <select id="audit-resource" value={auditResourceFilter} onChange={(event) => setAuditResourceFilter(event.target.value)}>
+                    <option value="">Todos</option>
+                    <option value="billing">Facturación</option><option value="documents">Documentos</option>
+                    <option value="residents">Residentes</option><option value="rooms">Habitaciones</option>
+                    <option value="stays">Estadías</option><option value="medical">Clínica</option>
+                    <option value="medication-events">Medicamentos</option><option value="diet-plans">Alimentación</option>
+                  </select>
+                </div>
+                <button type="button" onClick={() => void loadAudit()} disabled={auditLoading}>Aplicar filtros</button>
+              </div>
+              {auditError && <p className="error" role="alert">{auditError}</p>}
+              {auditLoading ? <p role="status">Cargando eventos...</p> : auditEvents.length === 0 ? <p>No hay eventos para mostrar.</p> : (
+                <div className="table-scroll"><table className="data-table">
+                  <thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Recurso</th><th>Resultado</th></tr></thead>
+                  <tbody>{auditEvents.map((event) => <tr key={event.id}>
+                    <td>{new Date(event.createdAt).toLocaleString("es-CL")}</td>
+                    <td>{event.actor}</td>
+                    <td>{event.action.toUpperCase()}</td>
+                    <td>{event.resource}{event.resourceId ? ` · ${event.resourceId}` : ""}</td>
+                    <td>{event.statusCode}</td>
+                  </tr>)}</tbody>
+                </table></div>
               )}
             </section>
           </section>
@@ -1039,6 +2591,112 @@ export default function App() {
                   <div>
                     <strong>
                       {resident.firstName} {resident.lastName}
+              {hasPermission(user, "billing.write") && (
+                <>
+                  <section className="card" aria-labelledby="installment-plan-title">
+                    <h2 id="installment-plan-title">Plan de cuotas</h2>
+                    <form className="module-entry-form" onSubmit={handleInstallmentSubmit}>
+                      <label htmlFor="installment-description">Descripción</label>
+                      <input id="installment-description" value={installmentDescription} onChange={(event) => setInstallmentDescription(event.target.value)} maxLength={140} required disabled={installmentSaving} />
+                      <label htmlFor="installment-total">Total en pesos</label>
+                      <input id="installment-total" type="number" min="2" step="1" value={installmentTotal} onChange={(event) => setInstallmentTotal(event.target.value)} required disabled={installmentSaving} />
+                      <label htmlFor="installment-count">Cantidad de cuotas</label>
+                      <input id="installment-count" type="number" min="2" max="36" step="1" value={installmentCount} onChange={(event) => setInstallmentCount(event.target.value)} required disabled={installmentSaving} />
+                      <label htmlFor="installment-first-date">Primer vencimiento</label>
+                      <input id="installment-first-date" type="date" value={installmentFirstDueDate} onChange={(event) => setInstallmentFirstDueDate(event.target.value)} required disabled={installmentSaving} />
+                      <p className="form-hint">El total se divide en montos enteros CLP; el residuo se agrega a la última cuota. El total del plan se suma al saldo interno.</p>
+                      {installmentError && <p className="error" role="alert">{installmentError}</p>}
+                      {installmentSuccess && <p className="success" role="status">{installmentSuccess}</p>}
+                      <button type="submit" disabled={installmentSaving || !billingResidentId}>{installmentSaving ? "Guardando..." : "Crear plan de cuotas"}</button>
+                    </form>
+                    {installmentLoading ? <p role="status">Cargando planes...</p> : installmentPlans.length === 0 ? <p>No hay planes para mostrar.</p> : (
+                      <div className="table-scroll"><table className="data-table">
+                        <thead><tr><th>Residente</th><th>Plan</th><th>Cuotas</th><th>Calendario</th><th>Total</th></tr></thead>
+                        <tbody>{installmentPlans.map((plan) => {
+                          const resident = residents.find((item) => item.id === plan.residentId);
+                          return <tr key={plan.id}>
+                            <td>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"}</td>
+                            <td>{plan.description}</td>
+                            <td>{plan.installmentCount}</td>
+                            <td>{plan.installments.map((installment) => `${installment.number}: ${new Date(`${installment.dueDate.slice(0, 10)}T12:00:00`).toLocaleDateString("es-CL")} ${formatCLP(installment.amountClp)}`).join(" · ")}</td>
+                            <td>{formatCLP(plan.totalAmountClp)}</td>
+                          </tr>;
+                        })}</tbody>
+                      </table></div>
+                    )}
+                  </section>
+
+                  <section className="card" aria-labelledby="tax-draft-title">
+                    <h2 id="tax-draft-title">Borrador administrativo</h2>
+                    <p className="warning-note">Solo vista previa interna. No es un DTE, no tiene folio ni validez tributaria y no se envía al SII.</p>
+                    <form className="module-entry-form" onSubmit={handleTaxDraftSubmit}>
+                      <label htmlFor="tax-draft-type">Tipo de borrador</label>
+                      <select id="tax-draft-type" value={taxDraftType} onChange={(event) => setTaxDraftType(event.target.value as "boleta" | "factura")} disabled={taxDraftSaving}>
+                        <option value="boleta">Boleta (borrador)</option>
+                        <option value="factura">Factura (borrador)</option>
+                      </select>
+                      <label htmlFor="tax-draft-description">Descripción</label>
+                      <input id="tax-draft-description" value={taxDraftDescription} onChange={(event) => setTaxDraftDescription(event.target.value)} maxLength={180} required disabled={taxDraftSaving} />
+                      <label htmlFor="tax-draft-amount">Monto total en pesos</label>
+                      <input id="tax-draft-amount" type="number" min="1" step="1" value={taxDraftAmount} onChange={(event) => setTaxDraftAmount(event.target.value)} required disabled={taxDraftSaving} />
+                      {taxDraftError && <p className="error" role="alert">{taxDraftError}</p>}
+                      {taxDraftSuccess && <p className="success" role="status">{taxDraftSuccess}</p>}
+                      <button type="submit" disabled={taxDraftSaving || !billingResidentId}>{taxDraftSaving ? "Guardando..." : "Crear borrador interno"}</button>
+                    </form>
+                    {taxDraftLoading ? <p role="status">Cargando borradores...</p> : taxDrafts.length === 0 ? <p>No hay borradores para mostrar.</p> : (
+                      <ul className="resident-list">
+                        {taxDrafts.map((draft) => {
+                          const resident = residents.find((item) => item.id === draft.residentId);
+                          return <li key={draft.id}>
+                            <div className="document-summary">
+                              <strong>{draft.documentType.toUpperCase()} · {draft.description}</strong>
+                              <span>{resident ? `${resident.firstName} ${resident.lastName}` : "Residente"} · {formatCLP(draft.amountClp)}</span>
+                              <small>BORRADOR · SIN VALIDEZ TRIBUTARIA</small>
+                            </div>
+                          </li>;
+                        })}
+                      </ul>
+                    )}
+                  </section>
+
+                  <section className="card" aria-labelledby="mock-payment-title">
+                    <h2 id="mock-payment-title">Pago de prueba local</h2>
+                    <p className="warning-note">Simulación local: no se solicitan tarjetas, no hay conexión a Transbank y no se mueve dinero.</p>
+                    <form className="module-entry-form" onSubmit={handleMockPayment}>
+                      <label htmlFor="mock-payment-description">Descripción</label>
+                      <input id="mock-payment-description" value={mockPaymentDescription} onChange={(event) => setMockPaymentDescription(event.target.value)} maxLength={140} required disabled={mockPaymentSaving} />
+                      <label htmlFor="mock-payment-amount">Monto simulado en pesos</label>
+                      <input id="mock-payment-amount" type="number" min="1" step="1" value={mockPaymentAmount} onChange={(event) => setMockPaymentAmount(event.target.value)} required disabled={mockPaymentSaving} />
+                      {mockPaymentError && <p className="error" role="alert">{mockPaymentError}</p>}
+                      {mockPaymentSuccess && <p className="success" role="status">{mockPaymentSuccess}</p>}
+                      <button type="submit" disabled={mockPaymentSaving || !billingResidentId}>{mockPaymentSaving ? "Simulando..." : "Simular pago aprobado"}</button>
+                    </form>
+                  </section>
+
+                  <section className="card" aria-labelledby="reconciliation-title">
+                    <h2 id="reconciliation-title">Conciliar cartola de prueba</h2>
+                    <p className="form-hint">Formato CSV: <code>date,amount_clp,reference,description</code>. Fecha AAAA-MM-DD; monto entero CLP. La cartola original no se conserva.</p>
+                    <form className="module-entry-form" onSubmit={handleReconciliationImport}>
+                      <label htmlFor="billing-reconciliation-file">CSV sintético</label>
+                      <input id="billing-reconciliation-file" type="file" accept=".csv,text/csv" onChange={(event) => setReconciliationFile(event.target.files?.[0] ?? null)} required disabled={reconciliationSaving} />
+                      {reconciliationError && <p className="error" role="alert">{reconciliationError}</p>}
+                      <button type="submit" disabled={reconciliationSaving}>{reconciliationSaving ? "Conciliando..." : "Comparar CSV"}</button>
+                    </form>
+                    {reconciliationLoading ? <p role="status">Cargando resultados...</p> : reconciliationBatches.map((batch) => (
+                      <div className="table-scroll" key={batch.id}>
+                        <h3>Importado {new Date(batch.createdAt).toLocaleString("es-CL")} · {batch.importedBy}</h3>
+                        <table className="data-table">
+                          <thead><tr><th>Línea</th><th>Fecha</th><th>Referencia</th><th>Monto</th><th>Resultado</th></tr></thead>
+                          <tbody>{batch.rows.map((row) => <tr key={`${batch.id}-${row.line}`}>
+                            <td>{row.line}</td><td>{new Date(`${row.date.slice(0, 10)}T12:00:00`).toLocaleDateString("es-CL")}</td>
+                            <td>{row.reference}</td><td>{formatCLP(row.amountClp)}</td><td>{row.status === "matched" ? "Coincide" : "Sin coincidencia"}</td>
+                          </tr>)}</tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </section>
+                </>
+              )}
                     </strong>
                   </div>
 
